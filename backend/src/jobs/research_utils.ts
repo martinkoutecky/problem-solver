@@ -1,11 +1,11 @@
 import { eq, sql, and, inArray, lt } from "drizzle-orm"
 import { problems, rounds, problem_files, llms, files_types } from "../../drizzle/schema"
-import type { OpenRouterUsageAccounting } from "@openrouter/ai-sdk-provider"
 import { z } from "zod"
 import { VerifierOutputSchema, SummarizerOutputSchema } from "@shared/types/research"
 import type { ModelID } from "@shared/types/research"
 import type { Database } from "../db"
 import { InferSelectModel } from "drizzle-orm"
+import type { LLMUsage } from "./generate_llm_response"
 
 export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0]
 export type DbOrTx = Database | Transaction
@@ -219,7 +219,9 @@ export async function update_problem_status(db: DbOrTx, problem_id: string, stat
     status,
     updated_at: sql`NOW()` as any,
   }
-  if (status === "completed") update_problem_data.active_round_id = sql`NULL` as any
+  if (status === "completed" || status === "failed" || status === "idle") {
+    update_problem_data.active_round_id = sql`NULL` as any
+  }
 
   await db.update(problems)
     .set(update_problem_data)
@@ -234,7 +236,7 @@ export async function save_problem_files(
     file_type: FileType,
     file_name: string,
     content: string,
-    usage?: OpenRouterUsageAccounting,
+    usage?: LLMUsage,
     model_id?: ModelID,
   }[]
 ) {
@@ -253,7 +255,7 @@ export async function save_llm_log(
   db: DbOrTx,
   prompt_file_id: string,
   response: unknown,
-  usage: OpenRouterUsageAccounting,
+  usage: LLMUsage,
   model: string
 ) {
   await db.insert(llms)

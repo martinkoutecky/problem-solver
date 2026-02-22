@@ -226,6 +226,28 @@ export const run_standard_research = define_job("start_research")
       prover_output,
     })
   })
+  .on("failed", async ({ db }, job, error) => {
+    const payload = job?.data as { new_research?: { problem_id?: string } } | undefined
+    const problem_id = payload?.new_research?.problem_id
+    if (!problem_id) return
+
+    try {
+      const problem = await db.query.problems.findFirst({
+        columns: {
+          active_round_id: true,
+        },
+        where: eq(problems.id, problem_id),
+      })
+
+      if (problem?.active_round_id) {
+        await update_round_phase(db, problem.active_round_id, "prover_failed", error.message)
+      }
+
+      await update_problem_status(db, problem_id, "failed")
+    } catch (e) {
+      console.error(`[job]{start_research} failure recovery failed for problem=${problem_id}:`, e)
+    }
+  })
 
 export const run_standard_verifier = define_job("verifier")
   .queue("standard_research")
