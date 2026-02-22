@@ -17,6 +17,7 @@ interface Model {
   id: string,
   name: string,
   provider: string,
+  transport?: "openrouter" | "codex_cli",
   price: {
     input: number,
     output: number,
@@ -67,6 +68,10 @@ export const provider_details = {
   },
   openai: {
     name: "OpenAI",
+    logo: "bi:openai",
+  },
+  codex: {
+    name: "Codex (Local)",
     logo: "bi:openai",
   },
   xai: {
@@ -303,6 +308,34 @@ export const models = {
       max_output_tokens: null,
     },
   ],
+  codex: [
+    {
+      id: "gpt-5.2",
+      name: "ChatGPT-5.2 (Codex Local)",
+      provider: "codex",
+      transport: "codex_cli",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: ["low", "medium", "high", "xhigh"],
+      },
+      structured_output: true,
+      max_output_tokens: null,
+    },
+    {
+      id: "gpt-5.3-codex",
+      name: "ChatGPT-5.3 Codex (Local)",
+      provider: "codex",
+      transport: "codex_cli",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: ["low", "medium", "high", "xhigh"],
+      },
+      structured_output: true,
+      max_output_tokens: null,
+    },
+  ],
   xai: [
     {
       id: "x-ai/grok-4.1-fast",
@@ -406,6 +439,12 @@ export function get_model_by_id(id: ModelID) {
     if (found) return found
   }
   return null
+}
+
+export function get_model_transport(id: ModelID): "openrouter" | "codex_cli" {
+  const model = get_model_by_id(id)
+  if (!model) return "openrouter"
+  return model.transport ?? "openrouter"
 }
 
 export const ModelConfigSchema = (role: AgentRole | "") => z.object({

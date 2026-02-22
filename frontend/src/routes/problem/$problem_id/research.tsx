@@ -2,7 +2,7 @@ import { useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
-import { useQuery, useMutation } from "@tanstack/react-query"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 
 import { Button, Spinner, Alert, AlertDialog, TextField, TextArea, NumberField, Label, Separator, Description, TagGroup, Tag, useOverlayState , UseOverlayStateReturn} from "@heroui/react"
 
@@ -74,6 +74,7 @@ const default_system_prompts = {
 function RunNewResearchPage() {
   const { problem_id } = Route.useParams()
   const navigate = useNavigate()
+  const query_client = useQueryClient()
   const { profile, is_loading } = useAuthStore()
   // BUG: quick workaround for nona-uth personas viewing reserach problem
   if (!is_loading) {
@@ -105,6 +106,18 @@ function RunNewResearchPage() {
     }),
   })
 
+  const force_fail = useMutation({
+    mutationFn: async () => {
+      const response = await api.research["force-fail"]({ problem_id }).post()
+      // @ts-expect-error Elysia BUG
+      if (response.error) throw new Error(response.error.value?.message ?? "Failed to force-fail problem")
+      return response.data
+    },
+    onSuccess: async () => {
+      await query_client.invalidateQueries({ queryKey: ["problem-research"] })
+    },
+  })
+
   const { register, handleSubmit, formState: { errors }, control } = useForm({
     defaultValues: {
       rounds: "1",
@@ -114,8 +127,8 @@ function RunNewResearchPage() {
         prompt: default_prompts["prover"],
         system_prompt: default_system_prompts["prover"],
         provers: [{
-          model: choose_model("google/gemini-3-pro-preview", {
-            reasoning_effort: "high",
+          model: choose_model("gpt-5.2", {
+            reasoning_effort: "xhigh",
             web_search: false,
           }, "prover")
         }],
@@ -123,7 +136,7 @@ function RunNewResearchPage() {
       verifier: {
         prompt: default_prompts["verifier"],
         system_prompt: default_system_prompts["verifier"],
-        model: choose_model("openai/gpt-5.2", {
+        model: choose_model("gpt-5.2", {
           reasoning_effort: "high",
           web_search: false,
         }, "verifier"),
@@ -131,8 +144,8 @@ function RunNewResearchPage() {
       summarizer: {
         prompt: default_prompts["summarizer"],
         system_prompt: default_system_prompts["summarizer"],
-        model: choose_model("openai/gpt-5-mini", {
-          reasoning_effort: "high",
+        model: choose_model("gpt-5.3-codex", {
+          reasoning_effort: "low",
           web_search: false,
         }, "summarizer"),
       }
@@ -174,7 +187,19 @@ function RunNewResearchPage() {
     <ProblemDetailsLayout problem_id={problem_id}
       problem_name={problem.name}>
       <div className="flex-1 flex-center">
-        <p>Active research running – can't run anything else for now</p>
+        <div className="flex flex-col gap-3 items-center">
+          <p>Active research running – can't run anything else for now</p>
+          <Button color="danger"
+            onPress={() => force_fail.mutate()}
+            isLoading={force_fail.isPending}>
+            Force Mark Failed
+          </Button>
+          {force_fail.isError && (
+            <Alert status="danger">
+              <p>{force_fail.error.message}</p>
+            </Alert>
+          )}
+        </div>
       </div>
     </ProblemDetailsLayout>
   )
@@ -364,7 +389,7 @@ function RunNewResearchPage() {
         </section>
 
         <section className="flex flex-col p-4 gap-4">
-          <p className="text-sm">Currently, GPT-5.2 Pro is the state-of-the-art model with reasoning set to <span className="font-kode font-bold">xhigh</span> but it manages to successfully return a response only in ~30 % of requests. Therefore, the default reasoning setting in Bolzano for GPT-5.2 Pro is set to <span className="font-kode font-bold">high</span> only as it's way more reliable. If you require the best performance, switch the reasoning to <span className="font-kode font-bold">xhigh</span> in the model selector yourself.</p>
+          <p className="text-sm">Default setup in this instance uses local Codex models: prover <span className="font-kode font-bold">gpt-5.2 xhigh</span>, verifier <span className="font-kode font-bold">gpt-5.2 high</span>, summarizer <span className="font-kode font-bold">gpt-5.3-codex low</span>.</p>
           <p className="text-sm">Be aware it's not possible to stop running research.</p>
 
           <Button type="submit"
