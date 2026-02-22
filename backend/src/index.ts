@@ -9,6 +9,7 @@ import { auth_router } from "./auth"
 
 import { jobs } from "./jobs"
 import { get_server_url } from "@backend/server"
+import { ensure_local_profile } from "@backend/auth/local"
 
 const api_router = new Elysia({ prefix: "/api" })
   .get("/health", { status: "ok" })
@@ -46,6 +47,7 @@ export const app = new Elysia()
   .use(backend)
   .use(frontend)
   .onStart(async () => {
+    await ensure_local_profile()
     await jobs.start()
     console.log(`✌️ [BACKEND] is running at http://${app.server?.hostname}:${app.server?.port}.`)
   })
@@ -73,19 +75,28 @@ process.on("SIGTERM", () => handle_shutdown())
 // DEV Hack to let TypeScript know we will always specify these in .env
 declare module "bun" {
   interface Env {
-    SUPABASE_URL: string,
-    SUPABASE_SECRET_KEY: string,
+    AUTH_MODE?: "local" | "supabase",
+    LOCAL_AUTH_USERNAME?: string,
+    LOCAL_AUTH_PASSWORD?: string,
+    LOCAL_AUTH_USER_ID?: string,
+    LOCAL_AUTH_NAME?: string,
+    LOCAL_AUTH_EMAIL?: string,
 
-    BACKEND_PORT: number,
-    FRONTEND_PORT: number,
+    SUPABASE_URL?: string,
+    SUPABASE_SECRET_KEY?: string,
+
+    BACKEND_PORT?: number,
+    FRONTEND_PORT?: number,
 
     DATABASE_URL: string,
     DATABASE_PASSWORD: string,
 
-    OPENROUTER_API_KEY: string,
-    OPENROUTER_PROVISION_KEY: string,
+    OPENROUTER_API_KEY?: string,
+    OPENROUTER_PROVISION_KEY?: string,
 
     REDIS_URL: string,
+    CODEX_TIMEOUT_MS?: string,
+    CODEX_BIN?: string,
   }
 }
 

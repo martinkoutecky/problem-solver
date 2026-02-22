@@ -228,7 +228,7 @@ function OpenRouterKeySection({ has_key, key_source, is_admin }: OpenRouterKeySe
       {is_admin && (
         <p className="text-sm">
           <span className="text-brand font-medium">[ADMIN]</span>{" "}
-          You use the system API key for research by default.
+          Admin can use a system OpenRouter key when one is configured on the backend.
         </p>
       )}
 

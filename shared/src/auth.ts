@@ -31,19 +31,22 @@ export const user_name_schema = z.string().trim()
   .max(50, "Wow, such a long name!")
 
 export const login_schema = z.object({
-  // TODO: constrain the email?
+  identifier: z.string().trim()
+    .nonempty("Username or email is required"),
+  password: z.string().trim()
+    .nonempty("Password is required")
+    .max(256, "Password is too long"),
+})
+
+// BUG/TODO: add trim() everywhere needed
+// TODO: add .nonempty() to more places like in @shared/problem
+export const signup_schema = z.object({
   email: z.email("Please enter a valid email").trim()
     .nonempty("Email is required"),
   password: z.string().trim()
     .nonempty("Password is required")
     .min(8, "Password must be at least 8 characters")
-    // NOTE: Supabase imposed limit
     .max(72, "Password must be less than 73 characters"),
-})
-
-// BUG/TODO: add trim() everywhere needed
-// TODO: add .nonempty() to more places like in @shared/problem
-export const signup_schema = login_schema.extend({
   name: user_name_schema,
 })
 
