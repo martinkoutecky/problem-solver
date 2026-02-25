@@ -38,7 +38,7 @@ export const research_router = new Elysia({ prefix: "/research" })
       const has_openrouter_key = await user_has_openrouter_key(db, user.id)
       if (!has_openrouter_key) return status(403, {
         type: "error",
-        message: "Selected configuration includes OpenRouter models. Add an OpenRouter API key in Settings or switch to local Codex models."
+        message: "Selected configuration includes OpenRouter models. Add an OpenRouter API key in Settings or switch to local Codex/OpenCode models."
       })
     }
 

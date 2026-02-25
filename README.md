@@ -19,7 +19,7 @@ The design has not been made responsive yet. Therefore, it is recommended to use
 ### Backend
 
 - HTTP server runs on [`Elysia`](https://elysiajs.com/).
-- LLM requests can be routed through local [`Codex`](https://github.com/openai/codex) and/or [`OpenRouter`](https://openrouter.ai/).
+- LLM requests can be routed through local [`Codex`](https://github.com/openai/codex), local [`OpenCode`](https://opencode.ai/), and/or [`OpenRouter`](https://openrouter.ai/).
 - Custom Job Manager based on [`BullMQ`](https://bullmq.io/) with connection to  self-hosted `Redis`.
 - Database runs on Postgres. Auth supports a local single-user mode and optional Supabase mode.
 - All DB requests should be made through [`Drizzle`](https://orm.drizzle.team/) – `SupabaseSDK` is used only for `.auth` management.

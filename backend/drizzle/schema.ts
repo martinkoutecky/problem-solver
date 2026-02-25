@@ -76,6 +76,7 @@ export const rounds = main.table("research_rounds", {
   completed_at: timestamp({ withTimezone: true, mode: "string" }),
 
   error_message: text(),
+  warning_message: text(),
 
   // This shall be used when resuming failed research
   research_config: json(),

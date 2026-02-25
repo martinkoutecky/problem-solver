@@ -214,6 +214,28 @@ export async function update_round_phase(
     .where(eq(rounds.id, round_id))
 }
 
+export async function append_round_warning_messages(
+  db: DbOrTx,
+  round_id: string,
+  warnings: string[]
+) {
+  const unique = [...new Set(warnings.map(w => w.trim()).filter(Boolean))]
+  if (unique.length === 0) return
+
+  const message = unique.join("\n")
+  await db.update(rounds)
+    .set({
+      warning_message: sql`
+        CASE
+          WHEN ${rounds.warning_message} IS NULL OR ${rounds.warning_message} = '' THEN ${message}
+          ELSE ${rounds.warning_message} || E'\n' || ${message}
+        END
+      ` as any,
+      updated_at: sql`NOW()` as any,
+    })
+    .where(eq(rounds.id, round_id))
+}
+
 export async function update_problem_status(db: DbOrTx, problem_id: string, status: ProblemStatus) {
   const update_problem_data: Partial<typeof problems.$inferInsert> = {
     status,

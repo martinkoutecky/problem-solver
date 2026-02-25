@@ -98,6 +98,7 @@ export const problems_router = new Elysia({ prefix: "/problems" })
               index: true,
               phase: true,
               error_message: true,
+              warning_message: true,
               prover_time: true,
               verifier_time: true,
               summarizer_time: true,
@@ -146,7 +147,8 @@ export const problems_router = new Elysia({ prefix: "/problems" })
           },
           usage: round.usage,
           estimated_usage: round.estimated_usage,
-          error: null
+          error: null,
+          warning_message: round.warning_message,
         }
         if (round.error_message || round.failed_provers) round_summary.error = {
           message: round.error_message,

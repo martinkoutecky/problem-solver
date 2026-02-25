@@ -97,6 +97,9 @@ declare module "bun" {
     REDIS_URL: string,
     CODEX_TIMEOUT_MS?: string,
     CODEX_BIN?: string,
+    OPENCODE_TIMEOUT_MS?: string,
+    OPENCODE_BIN?: string,
+    OPENCODE_DEBUG?: string,
   }
 }
 

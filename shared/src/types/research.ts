@@ -17,7 +17,7 @@ interface Model {
   id: string,
   name: string,
   provider: string,
-  transport?: "openrouter" | "codex_cli",
+  transport?: "openrouter" | "codex_cli" | "opencode_cli",
   price: {
     input: number,
     output: number,
@@ -73,6 +73,10 @@ export const provider_details = {
   codex: {
     name: "Codex (Local)",
     logo: "bi:openai",
+  },
+  opencode: {
+    name: "OpenCode (Local)",
+    logo: "mdi:console-line",
   },
   xai: {
     name: "xAI",
@@ -336,6 +340,34 @@ export const models = {
       max_output_tokens: null,
     },
   ],
+  opencode: [
+    {
+      id: "opencode/google/gemini-3-pro-preview",
+      name: "Gemini 3 Pro Preview (OpenCode Local)",
+      provider: "opencode",
+      transport: "opencode_cli",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: ["low", "high"],
+      },
+      structured_output: true,
+      max_output_tokens: null,
+    },
+    {
+      id: "opencode/google/gemini-3-flash-preview",
+      name: "Gemini 3 Flash Preview (OpenCode Local)",
+      provider: "opencode",
+      transport: "opencode_cli",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: ["none", "minimal", "low", "medium", "high"],
+      },
+      structured_output: true,
+      max_output_tokens: null,
+    },
+  ],
   xai: [
     {
       id: "x-ai/grok-4.1-fast",
@@ -441,7 +473,7 @@ export function get_model_by_id(id: ModelID) {
   return null
 }
 
-export function get_model_transport(id: ModelID): "openrouter" | "codex_cli" {
+export function get_model_transport(id: ModelID): "openrouter" | "codex_cli" | "opencode_cli" {
   const model = get_model_by_id(id)
   if (!model) return "openrouter"
   return model.transport ?? "openrouter"
