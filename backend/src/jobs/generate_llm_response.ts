@@ -124,7 +124,7 @@ function parse_json_output<T>(text: string, schema: z.ZodType<T>, log_prefix: st
   let parsed = false
   for (const candidate of candidates) {
     try {
-      parsed_json = JSON.parse(candidate)
+      parsed_json = parse_json_with_repairs(candidate)
       parsed = true
       console.log(`${log_prefix} JSON parsed successfully`)
       break
@@ -166,6 +166,78 @@ function extract_json_candidates(text: string) {
     seen.add(candidate)
     return true
   })
+}
+
+function repair_common_json_escaping_issues(text: string) {
+  let output = ""
+  let in_string = false
+  let escaped = false
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+
+    if (!in_string) {
+      output += ch
+      if (ch === "\"") in_string = true
+      continue
+    }
+
+    if (escaped) {
+      output += ch
+      escaped = false
+      continue
+    }
+
+    if (ch === "\\") {
+      const next = text[i + 1] ?? ""
+      const valid_escape = next === "\"" ||
+        next === "\\" ||
+        next === "/" ||
+        next === "b" ||
+        next === "f" ||
+        next === "n" ||
+        next === "r" ||
+        next === "t" ||
+        next === "u"
+
+      if (valid_escape) {
+        output += ch
+        escaped = true
+      } else {
+        // Preserve literal backslashes commonly used in markdown/LaTeX
+        // by converting invalid JSON escapes like \subset into \\subset.
+        output += "\\\\"
+      }
+      continue
+    }
+
+    if (ch === "\n") {
+      output += "\\n"
+      continue
+    }
+    if (ch === "\r") {
+      output += "\\r"
+      continue
+    }
+    if (ch === "\t") {
+      output += "\\t"
+      continue
+    }
+
+    output += ch
+    if (ch === "\"") in_string = false
+  }
+
+  return output
+}
+
+function parse_json_with_repairs(text: string) {
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    const repaired = repair_common_json_escaping_issues(text)
+    return JSON.parse(repaired) as unknown
+  }
 }
 
 function extract_first_balanced_json(text: string) {
@@ -571,7 +643,7 @@ function parse_json_output_candidates<T>(candidates: string[], schema: z.ZodType
     const json_candidates = extract_json_candidates(candidate)
     for (const json_candidate of json_candidates) {
       try {
-        const parsed = JSON.parse(json_candidate) as unknown
+        const parsed = parse_json_with_repairs(json_candidate)
         parsed_objects.push(parsed)
         const validated = schema.safeParse(parsed)
         if (validated.success) return validated.data

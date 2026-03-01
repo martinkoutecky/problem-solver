@@ -1,6 +1,6 @@
 import { Elysia } from "elysia"
 import { drizzle_plugin, auth_plugin } from "../plugins"
-import { problems, problem_files, rounds, profiles } from "../../drizzle/schema"
+import { problems, problem_files, rounds, profiles, llms } from "../../drizzle/schema"
 import { desc, eq, and, sql, or, inArray } from "drizzle-orm"
 import { z } from "zod"
 import slugify from "slugify"
@@ -706,6 +706,88 @@ export const problems_router = new Elysia({ prefix: "/problems" })
     }
   }, {
     body: CreateProblemFormSchema,
+    isAuth: true,
+  })
+
+  /**
+   * [AUTH] DELETE /problems/:problem_id
+   *
+   * Deletes a problem and all of its associated research data.
+   */
+  .delete("/:problem_id", async ({ db, user, params: { problem_id }, status }) => {
+    try {
+      const problem = await db.query.problems.findFirst({
+        columns: {
+          id: true,
+          owner_id: true,
+          status: true,
+        },
+        where: eq(problems.id, problem_id),
+      })
+      if (!problem) {
+        return status(404, {
+          type: "error",
+          message: "Problem not found.",
+        })
+      }
+
+      if (problem.owner_id !== user.id) {
+        return status(403, {
+          type: "error",
+          message: "You can only delete your own problem.",
+        })
+      }
+
+      if (problem.status === "running" || problem.status === "queued") {
+        return status(409, {
+          type: "error",
+          message: "Can't delete problem while research is running. Force-fail it first.",
+        })
+      }
+
+      await db.transaction(async (tx) => {
+        const problem_rounds = await tx
+          .select({ id: rounds.id })
+          .from(rounds)
+          .where(eq(rounds.problem_id, problem_id))
+        const round_ids = problem_rounds.map((round) => round.id)
+
+        const prompt_file_ids = await tx
+          .select({ id: problem_files.id })
+          .from(problem_files)
+          .where(eq(problem_files.problem_id, problem_id))
+
+        if (prompt_file_ids.length > 0) {
+          await tx.delete(llms)
+            .where(inArray(llms.prompt_file_id, prompt_file_ids.map((f) => f.id)))
+        }
+
+        await tx.delete(problem_files)
+          .where(eq(problem_files.problem_id, problem_id))
+
+        if (round_ids.length > 0) {
+          await tx.delete(rounds)
+            .where(eq(rounds.problem_id, problem_id))
+        }
+
+        await tx.delete(problems)
+          .where(eq(problems.id, problem_id))
+      })
+
+      return {
+        type: "success",
+        message: "Problem deleted.",
+      }
+    } catch (e) {
+      return status(500, {
+        type: "error",
+        message: "Failed to delete problem.",
+      })
+    }
+  }, {
+    params: z.object({
+      problem_id: z.uuid(),
+    }),
     isAuth: true,
   })
 
