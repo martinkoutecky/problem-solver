@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { z } from "zod"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -14,7 +14,7 @@ import { useForm, Controller, useFieldArray } from "react-hook-form"
 import ErrorBox from "../../../components/form/ErrorBox"
 import { api } from "../../../api"
 import { get_research_overview } from "../../../api/problems"
-import { NewStandardResearch, MaxProversPerRound, MaxRoundsPerResearch, choose_model, get_model_by_id, ModelConfig } from "@shared/types/research"
+import { NewStandardResearch, MaxProversPerRound, MaxRoundsPerResearch, get_model_by_id, ModelConfig } from "@shared/types/research"
 
 import UserPromptProver from "@shared/prompts/user/prover.md?raw"
 import UserPromptVerifier from "@shared/prompts/user/verifier.md?raw"
@@ -29,6 +29,7 @@ import ModelSelect from "@frontend/components/form/ModelSelect"
 import ProviderLogo from "@frontend/components/svg/ProviderLogo"
 
 import { useAuthStore } from "@frontend/auth/store"
+import { load_research_ui_preferences } from "@frontend/utils/research_preferences"
 
 export const Route = createFileRoute("/problem/$problem_id/research")({
   component: RunNewResearchPage,
@@ -86,6 +87,7 @@ function RunNewResearchPage() {
 
   const [selected_editor, setSelectedEditor] = useState<EditorSelection>("round_instructions")
   const [pending_data, setPendingData] = useState<NewStandardResearchType | null>(null)
+  const research_ui_preferences = useMemo(() => load_research_ui_preferences(), [])
 
   const research_modal_controller = useOverlayState()
 
@@ -127,27 +129,18 @@ function RunNewResearchPage() {
         prompt: default_prompts["prover"],
         system_prompt: default_system_prompts["prover"],
         provers: [{
-          model: choose_model("gpt-5.2", {
-            reasoning_effort: "xhigh",
-            web_search: false,
-          }, "prover")
+          model: research_ui_preferences.default_models.prover
         }],
       },
       verifier: {
         prompt: default_prompts["verifier"],
         system_prompt: default_system_prompts["verifier"],
-        model: choose_model("gpt-5.2", {
-          reasoning_effort: "high",
-          web_search: false,
-        }, "verifier"),
+        model: research_ui_preferences.default_models.verifier,
       },
       summarizer: {
         prompt: default_prompts["summarizer"],
         system_prompt: default_system_prompts["summarizer"],
-        model: choose_model("gpt-5.3-codex", {
-          reasoning_effort: "low",
-          web_search: false,
-        }, "summarizer"),
+        model: research_ui_preferences.default_models.summarizer,
       }
     },
     resolver: zodResolver(NewStandardResearch)
@@ -162,7 +155,7 @@ function RunNewResearchPage() {
     const current_count = provers.length
     if (new_prover_count > current_count) {
       for (let i = current_count; i < new_prover_count; i++) {
-        append({ model: undefined } as any)
+        append({ model: research_ui_preferences.default_models.prover } as any)
       }
     } else if (new_prover_count < current_count) {
       for (let i = current_count - 1; i >= new_prover_count; i--) {
@@ -285,6 +278,7 @@ function RunNewResearchPage() {
                     render={({ field }) => (
                       <ModelSelect trigger_style="rounded-none h-full flex-center bg-alpha shadow-none pl-2"
                         role="prover"
+                        transport_visibility={research_ui_preferences.transport_visibility}
                         selected={field.value}
                         onChange={field.onChange}/>
                     )}
@@ -305,6 +299,7 @@ function RunNewResearchPage() {
                 control={control}
                 render={({ field }) => (
                   <ModelSelect role="verifier"
+                    transport_visibility={research_ui_preferences.transport_visibility}
                     selected={field.value}
                     onChange={field.onChange}/>
                 )}/>
@@ -319,6 +314,7 @@ function RunNewResearchPage() {
                 control={control}
                 render={({ field }) => (
                   <ModelSelect role="summarizer"
+                    transport_visibility={research_ui_preferences.transport_visibility}
                     selected={field.value}
                     onChange={field.onChange}/>
                 )}/>
@@ -389,7 +385,7 @@ function RunNewResearchPage() {
         </section>
 
         <section className="flex flex-col p-4 gap-4">
-          <p className="text-sm">Default setup in this instance uses local Codex models: prover <span className="font-kode font-bold">gpt-5.2 xhigh</span>, verifier <span className="font-kode font-bold">gpt-5.2 high</span>, summarizer <span className="font-kode font-bold">gpt-5.3-codex low</span>.</p>
+          <p className="text-sm">Default models and visible transports are configured in <span className="font-kode font-bold">Settings → Research UI</span>.</p>
           <p className="text-sm">Be aware it's not possible to stop running research.</p>
 
           <Button type="submit"

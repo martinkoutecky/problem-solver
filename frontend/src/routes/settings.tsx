@@ -26,10 +26,19 @@ import {
   InputOTP,
   Separator,
   Description,
-  Link
+  Link,
+  Switch,
 } from "@heroui/react"
 import { Icon } from "@iconify/react"
 import { SignOut } from "../components/auth/SignOut"
+import ModelSelect from "@frontend/components/form/ModelSelect"
+import {
+  load_research_ui_preferences,
+  normalize_research_ui_preferences,
+  save_research_ui_preferences,
+  type ResearchUIPreferences,
+  type TransportVisibility,
+} from "@frontend/utils/research_preferences"
 
 export const Route = createFileRoute("/settings")({
   component: SettingsPage,
@@ -64,6 +73,8 @@ function SettingsPage() {
         has_key={profile.has_openrouter_key}
         key_source={profile.key_source}
         is_admin={profile.role === "admin"}/>
+
+      <ResearchUIPreferencesSection/>
 
       <section className="flex flex-col gap-4 max-w-lg">
         <h2>Account</h2>
@@ -435,3 +446,110 @@ const APIKeyEncryptionNote = () => (
     </Link>.
   </>
 )
+
+function ResearchUIPreferencesSection() {
+  const [preferences, setPreferences] = useState<ResearchUIPreferences>(() => load_research_ui_preferences())
+
+  const update_preferences = (next: ResearchUIPreferences) => {
+    const normalized = normalize_research_ui_preferences(next)
+    setPreferences(normalized)
+    save_research_ui_preferences(normalized)
+  }
+
+  const set_transport = (transport: keyof TransportVisibility, value: boolean) => {
+    const next_visibility: TransportVisibility = {
+      ...preferences.transport_visibility,
+      [transport]: value,
+    }
+
+    if (!next_visibility.openrouter && !next_visibility.codex_cli && !next_visibility.opencode_cli) {
+      next_visibility.codex_cli = true
+    }
+
+    update_preferences({
+      ...preferences,
+      transport_visibility: next_visibility,
+    })
+  }
+
+  return (
+    <section className="flex flex-col gap-4 max-w-lg">
+      <h2>Research UI</h2>
+
+      <div className="flex flex-col gap-3">
+        <p className="text-sm">Visible model transports in selectors</p>
+        <div className="grid grid-cols-1 gap-2">
+          <Switch
+            isSelected={preferences.transport_visibility.codex_cli}
+            onChange={(value) => set_transport("codex_cli", value)}
+            className="flex justify-between items-center w-full">
+            <p className="text-sm">Show Codex (local)</p>
+            <Switch.Control>
+              <Switch.Thumb/>
+            </Switch.Control>
+          </Switch>
+          <Switch
+            isSelected={preferences.transport_visibility.opencode_cli}
+            onChange={(value) => set_transport("opencode_cli", value)}
+            className="flex justify-between items-center w-full">
+            <p className="text-sm">Show OpenCode (local)</p>
+            <Switch.Control>
+              <Switch.Thumb/>
+            </Switch.Control>
+          </Switch>
+          <Switch
+            isSelected={preferences.transport_visibility.openrouter}
+            onChange={(value) => set_transport("openrouter", value)}
+            className="flex justify-between items-center w-full">
+            <p className="text-sm">Show OpenRouter</p>
+            <Switch.Control>
+              <Switch.Thumb/>
+            </Switch.Control>
+          </Switch>
+        </div>
+      </div>
+
+      <Separator/>
+
+      <div className="flex flex-col gap-3">
+        <p className="text-sm">Default models for new research runs</p>
+
+        <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
+          <Label>Prover</Label>
+          <ModelSelect
+            role="prover"
+            selected={preferences.default_models.prover}
+            transport_visibility={preferences.transport_visibility}
+            onChange={(model) => update_preferences({
+              ...preferences,
+              default_models: { ...preferences.default_models, prover: model },
+            })}/>
+        </div>
+
+        <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
+          <Label>Verifier</Label>
+          <ModelSelect
+            role="verifier"
+            selected={preferences.default_models.verifier}
+            transport_visibility={preferences.transport_visibility}
+            onChange={(model) => update_preferences({
+              ...preferences,
+              default_models: { ...preferences.default_models, verifier: model },
+            })}/>
+        </div>
+
+        <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
+          <Label>Summarizer</Label>
+          <ModelSelect
+            role="summarizer"
+            selected={preferences.default_models.summarizer}
+            transport_visibility={preferences.transport_visibility}
+            onChange={(model) => update_preferences({
+              ...preferences,
+              default_models: { ...preferences.default_models, summarizer: model },
+            })}/>
+        </div>
+      </div>
+    </section>
+  )
+}
