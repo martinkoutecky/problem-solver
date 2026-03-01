@@ -314,6 +314,19 @@ export const models = {
   ],
   codex: [
     {
+      id: "gpt-5.1-codex-mini",
+      name: "GPT-5.1 Codex Mini (Local)",
+      provider: "codex",
+      transport: "codex_cli",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: ["low", "medium", "high"],
+      },
+      structured_output: true,
+      max_output_tokens: null,
+    },
+    {
       id: "gpt-5.2",
       name: "ChatGPT-5.2 (Codex Local)",
       provider: "codex",
