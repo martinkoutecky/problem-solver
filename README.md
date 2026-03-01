@@ -30,6 +30,27 @@ The design has not been made responsive yet. Therefore, it is recommended to use
 
 The `.env` file should be located in the root directory. Access for `backend` & `frontend` is specified through run command in scripts. Have a look at [`.env.example`](.env.example) to see all required variables.
 
+### Automated Adapter Test Runner
+
+To run a full local end-to-end adapter test (login, create problem, start research, poll, collect debug, auto-cleanup), use:
+
+```bash
+bun run test:adapter \
+  --problem /path/to/problem.md \
+  --prover "gemini-3-pro-preview(high)" \
+  --verifier "gpt-5.2(medium)" \
+  --summarizer "gemini-3-flash-preview(medium)"
+```
+
+Artifacts are saved under `debug/runs/<timestamp>-<tag>/`.
+
+Useful flags:
+- `--rounds <n>` (default `1`)
+- `--prover-count <n>` (default `1`)
+- `--timeout-min <n>` (default `45`)
+- `--auto-delete` (default is keep problem)
+- `--backend-url http://localhost:3942`
+
 ### Production
 
 Bolzano is currently hosted on [Railway](https://railway.com). Railway handles everything on it's own based on the project structure therefore no config is required.

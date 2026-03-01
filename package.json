@@ -16,7 +16,8 @@
     "frontend:check": "cd frontend && bun run check",
     "shared:build": "cd shared && bun run build",
     "build": "bun x concurrently 'bun run shared:build' 'bun run backend:build' 'bun run frontend:build'",
-    "start": "cd backend && bun run start"
+    "start": "cd backend && bun run start",
+    "test:adapter": "bun run tools/test-adapter.ts"
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^2.0.0",
