@@ -19,7 +19,7 @@ The design has not been made responsive yet. Therefore, it is recommended to use
 ### Backend
 
 - HTTP server runs on [`Elysia`](https://elysiajs.com/).
-- LLM requests can be routed through local [`Codex`](https://github.com/openai/codex), local [`OpenCode`](https://opencode.ai/), and/or [`OpenRouter`](https://openrouter.ai/).
+- LLM requests can be routed through local [`Codex`](https://github.com/openai/codex), local [`OpenCode`](https://opencode.ai/), local Claude CLI, and/or [`OpenRouter`](https://openrouter.ai/).
 - Custom Job Manager based on [`BullMQ`](https://bullmq.io/) with connection to  self-hosted `Redis`.
 - Database runs on Postgres. Auth supports a local single-user mode and optional Supabase mode.
 - All DB requests should be made through [`Drizzle`](https://orm.drizzle.team/) – `SupabaseSDK` is used only for `.auth` management.
@@ -50,6 +50,15 @@ Useful flags:
 - `--timeout-min <n>` (default `45`)
 - `--auto-delete` (default is keep problem)
 - `--backend-url http://localhost:3942`
+
+For local Claude transport, install and authenticate `claude` CLI, then configure:
+- `CLAUDE_BIN` (default `claude`)
+- `CLAUDE_TIMEOUT_MS` (default `1800000`)
+- `CLAUDE_DEBUG` (`1` to store transport debug artifacts)
+
+For restart behavior of persisted Redis jobs:
+- `JOB_STARTUP_RECOVERY_MODE=fail_and_purge` (default) marks `queued/running` problems as failed and purges unfinished queue jobs on backend startup, preventing silent re-runs after restart.
+- `JOB_STARTUP_RECOVERY_MODE=none` keeps BullMQ default recovery behavior.
 
 ### Production
 

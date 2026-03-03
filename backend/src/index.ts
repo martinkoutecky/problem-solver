@@ -10,6 +10,8 @@ import { auth_router } from "./auth"
 import { jobs } from "./jobs"
 import { get_server_url } from "@backend/server"
 import { ensure_local_profile } from "@backend/auth/local"
+import { get_db } from "./db"
+import { get_startup_recovery_mode, reconcile_inflight_research } from "./jobs/startup_recovery"
 
 const api_router = new Elysia({ prefix: "/api" })
   .get("/health", { status: "ok" })
@@ -48,6 +50,16 @@ export const app = new Elysia()
   .use(frontend)
   .onStart(async () => {
     await ensure_local_profile()
+    const startup_recovery_mode = get_startup_recovery_mode()
+    if (startup_recovery_mode === "fail_and_purge") {
+      const { affected_problems, affected_rounds } = await reconcile_inflight_research(get_db())
+      console.log(
+        `[startup_recovery] mode=${startup_recovery_mode} ` +
+        `affected_problems=${affected_problems} affected_rounds=${affected_rounds}`
+      )
+    } else {
+      console.log(`[startup_recovery] mode=${startup_recovery_mode}`)
+    }
     await jobs.start()
     console.log(`✌️ [BACKEND] is running at http://${app.server?.hostname}:${app.server?.port}.`)
   })
@@ -95,11 +107,19 @@ declare module "bun" {
     OPENROUTER_PROVISION_KEY?: string,
 
     REDIS_URL: string,
+    JOB_STARTUP_RECOVERY_MODE?: "none" | "fail_and_purge",
+    BULLMQ_CONCURRENCY?: string,
+    BULLMQ_LOCK_DURATION_MS?: string,
+    BULLMQ_STALLED_INTERVAL_MS?: string,
     CODEX_TIMEOUT_MS?: string,
     CODEX_BIN?: string,
     OPENCODE_TIMEOUT_MS?: string,
     OPENCODE_BIN?: string,
     OPENCODE_DEBUG?: string,
+
+    CLAUDE_BIN?: string,
+    CLAUDE_TIMEOUT_MS?: string,
+    CLAUDE_DEBUG?: string,
   }
 }
 
