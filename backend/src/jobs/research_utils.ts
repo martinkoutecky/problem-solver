@@ -6,6 +6,7 @@ import type { ModelID } from "@shared/types/research"
 import type { Database } from "../db"
 import { InferSelectModel } from "drizzle-orm"
 import type { LLMUsage } from "./generate_llm_response"
+import { sync_problem_file, sync_problem_main_files } from "@backend/mirror/output_mirror"
 
 export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0]
 export type DbOrTx = Database | Transaction
@@ -266,6 +267,14 @@ export async function save_problem_files(
   const result = await db.insert(problem_files)
     .values(files)
     .returning({ id: problem_files.id })
+
+  for (const inserted of result) {
+    try {
+      await sync_problem_file(db, inserted.id)
+    } catch (error) {
+      console.warn(`[mirror] failed to sync file id=${inserted.id}: ${(error as Error).message}`)
+    }
+  }
   return result
 }
 
@@ -316,6 +325,12 @@ export async function update_main_files(
         eq(problem_files.file_type, "output")
       ))
   })
+
+  try {
+    await sync_problem_main_files(db, problem_id)
+  } catch (error) {
+    console.warn(`[mirror] failed to sync main files for problem=${problem_id}: ${(error as Error).message}`)
+  }
 }
 
 export async function fetch_previous_round_files(

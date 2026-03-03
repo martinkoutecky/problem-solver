@@ -107,6 +107,8 @@ declare module "bun" {
     OPENROUTER_PROVISION_KEY?: string,
 
     REDIS_URL: string,
+    OUTPUT_MIRROR_ENABLED?: string,
+    OUTPUT_MIRROR_ROOT?: string,
     JOB_STARTUP_RECOVERY_MODE?: "none" | "fail_and_purge",
     BULLMQ_CONCURRENCY?: string,
     BULLMQ_LOCK_DURATION_MS?: string,

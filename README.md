@@ -60,6 +60,15 @@ For restart behavior of persisted Redis jobs:
 - `JOB_STARTUP_RECOVERY_MODE=fail_and_purge` (default) marks `queued/running` problems as failed and purges unfinished queue jobs on backend startup, preventing silent re-runs after restart.
 - `JOB_STARTUP_RECOVERY_MODE=none` keeps BullMQ default recovery behavior.
 
+Filesystem output mirror (for backups/audits):
+- `OUTPUT_MIRROR_ENABLED=1` enables mirror writes (default on)
+- `OUTPUT_MIRROR_ROOT=outputs` (default, relative to repository root)
+- Mirror path format: `outputs/<owner-id>/<problem-slug>-<problemId8>/...`
+- One-time backfill for existing problems:
+  ```bash
+  bun run mirror:backfill
+  ```
+
 ### Production
 
 Bolzano is currently hosted on [Railway](https://railway.com). Railway handles everything on it's own based on the project structure therefore no config is required.

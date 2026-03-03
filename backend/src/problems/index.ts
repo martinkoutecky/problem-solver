@@ -11,6 +11,7 @@ import { create_zip, divide_files_into_rounds } from "@backend/problems/download
 import { CreateProblemFormSchema } from "@shared/types/problem"
 import { run_experimental_research } from "@backend/jobs/v2/experimental_research"
 import { choose_model } from "@shared/types/research"
+import { sync_problem_main_files, sync_problem_round } from "@backend/mirror/output_mirror"
 
 
 export const problems_router = new Elysia({ prefix: "/problems" })
@@ -635,7 +636,7 @@ export const problems_router = new Elysia({ prefix: "/problems" })
    */
   .post("/create-new-problem", async ({ db, user, body, status }) => {
     try {
-      let new_problem_id = await db.transaction(async (tx) => {
+      const created_problem = await db.transaction(async (tx) => {
         const [new_problem] = await tx.insert(problems)
           .values({
             owner_id: user.id,
@@ -689,13 +690,26 @@ export const problems_router = new Elysia({ prefix: "/problems" })
               content: INITIAL_MAIN_FILES.todo,
             },
           ])
-        return new_problem.id
+        return {
+          problem_id: new_problem.id,
+          round_zero_id: round_zero.id,
+        }
       })
+
+      try {
+        await sync_problem_main_files(db, created_problem.problem_id)
+        await sync_problem_round(db, created_problem.problem_id, created_problem.round_zero_id)
+      } catch (error) {
+        console.warn(
+          `[mirror] failed to initialize mirror for problem=${created_problem.problem_id}: ` +
+          `${(error as Error).message}`
+        )
+      }
       return {
         type: "success",
         message: "New problem created successfully!",
         data: {
-          problem_id: new_problem_id,
+          problem_id: created_problem.problem_id,
         }
       }
     } catch (e) {
