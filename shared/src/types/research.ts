@@ -17,7 +17,7 @@ interface Model {
   id: string,
   name: string,
   provider: string,
-  transport?: "openrouter" | "codex_cli" | "opencode_cli",
+  transport?: "openrouter" | "codex_cli" | "opencode_cli" | "claude_cli" | "metacentrum_openai",
   price: {
     input: number,
     output: number,
@@ -74,9 +74,17 @@ export const provider_details = {
     name: "Codex (Local)",
     logo: "bi:openai",
   },
+  claude: {
+    name: "Claude (Local)",
+    logo: "simple-icons:anthropic",
+  },
   opencode: {
     name: "OpenCode (Local)",
     logo: "mdi:console-line",
+  },
+  metacentrum: {
+    name: "MetaCentrum",
+    logo: null,
   },
   xai: {
     name: "xAI",
@@ -212,6 +220,60 @@ export const models = {
         // have a look here, supposedly it reacts to max_tokens
         // also proposes to stream the response?
         reasoning: null,
+      },
+      structured_output: false,
+      max_output_tokens: null,
+    },
+  ],
+  metacentrum: [
+    {
+      id: "metacentrum/kimi-k2.5",
+      name: "Kimi K2.5 (MetaCentrum)",
+      provider: "metacentrum",
+      transport: "metacentrum_openai",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: "toggle",
+      },
+      structured_output: true,
+      max_output_tokens: null,
+    },
+    {
+      id: "metacentrum/gpt-oss-120b",
+      name: "GPT OSS 120B (MetaCentrum)",
+      provider: "metacentrum",
+      transport: "metacentrum_openai",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: ["low", "medium", "high"],
+      },
+      structured_output: false,
+      max_output_tokens: null,
+    },
+    {
+      id: "metacentrum/deepseek-v3.2-thinking",
+      name: "DeepSeek V3.2 Thinking (MetaCentrum)",
+      provider: "metacentrum",
+      transport: "metacentrum_openai",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: null,
+      },
+      structured_output: false,
+      max_output_tokens: null,
+    },
+    {
+      id: "metacentrum/glm-4.7",
+      name: "GLM 4.7 (MetaCentrum)",
+      provider: "metacentrum",
+      transport: "metacentrum_openai",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: "toggle",
       },
       structured_output: false,
       max_output_tokens: null,
@@ -353,6 +415,47 @@ export const models = {
       max_output_tokens: null,
     },
   ],
+  claude: [
+    {
+      id: "claude/claude-opus-4-6",
+      name: "Claude Opus 4.6 (Local)",
+      provider: "claude",
+      transport: "claude_cli",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: ["low", "medium", "high"],
+      },
+      structured_output: true,
+      max_output_tokens: null,
+    },
+    {
+      id: "claude/claude-sonnet-4-6",
+      name: "Claude Sonnet 4.6 (Local)",
+      provider: "claude",
+      transport: "claude_cli",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: ["low", "medium", "high"],
+      },
+      structured_output: true,
+      max_output_tokens: null,
+    },
+    {
+      id: "claude/claude-haiku-4-5",
+      name: "Claude Haiku 4.5 (Local)",
+      provider: "claude",
+      transport: "claude_cli",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: ["low", "medium", "high"],
+      },
+      structured_output: true,
+      max_output_tokens: null,
+    },
+  ],
   opencode: [
     {
       id: "opencode/google/gemini-3-pro-preview",
@@ -486,7 +589,7 @@ export function get_model_by_id(id: ModelID) {
   return null
 }
 
-export function get_model_transport(id: ModelID): "openrouter" | "codex_cli" | "opencode_cli" {
+export function get_model_transport(id: ModelID): "openrouter" | "codex_cli" | "opencode_cli" | "claude_cli" | "metacentrum_openai" {
   const model = get_model_by_id(id)
   if (!model) return "openrouter"
   return model.transport ?? "openrouter"

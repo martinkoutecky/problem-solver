@@ -72,6 +72,17 @@ const MODEL_ALIASES: Record<string, ModelID> = {
   "gemini-3-pro-preview": "opencode/google/gemini-3-pro-preview",
   "gemini-3-flash": "opencode/google/gemini-3-flash-preview",
   "gemini-3-flash-preview": "opencode/google/gemini-3-flash-preview",
+  "claude-opus-4.6": "claude/claude-opus-4-6",
+  "claude-sonnet-4.6": "claude/claude-sonnet-4-6",
+  "claude-haiku-4.5": "claude/claude-haiku-4-5",
+  "metacentrum-kimi-k2.5": "metacentrum/kimi-k2.5",
+  "kimi-k2.5-metacentrum": "metacentrum/kimi-k2.5",
+  "metacentrum-gpt-oss-120b": "metacentrum/gpt-oss-120b",
+  "gpt-oss-120b-metacentrum": "metacentrum/gpt-oss-120b",
+  "metacentrum-deepseek-v3.2": "metacentrum/deepseek-v3.2-thinking",
+  "deepseek-v3.2-metacentrum": "metacentrum/deepseek-v3.2-thinking",
+  "metacentrum-glm-4.7": "metacentrum/glm-4.7",
+  "glm-4.7-metacentrum": "metacentrum/glm-4.7",
 }
 
 async function main() {
