@@ -1,15 +1,19 @@
 import { get_model_by_id, models, type ModelConfig, type ModelID, type ReasoningConfig, type ReasoningEffort, type ReasoningEffortValue } from "@shared/types/research"
 
-export type Transport = "openrouter" | "codex_cli" | "opencode_cli"
+export type Transport = "openrouter" | "codex_cli" | "opencode_cli" | "claude_cli" | "metacentrum_openai"
 
-export interface TransportVisibility {
+export type ModelVisibility = Record<ModelID, boolean>
+
+interface LegacyTransportVisibility {
   openrouter: boolean
   codex_cli: boolean
   opencode_cli: boolean
+  claude_cli: boolean
+  metacentrum_openai: boolean
 }
 
-export interface ResearchUIPreferences {
-  transport_visibility: TransportVisibility
+interface LegacyResearchUIPreferences {
+  transport_visibility: LegacyTransportVisibility
   default_models: {
     prover: ModelConfig
     verifier: ModelConfig
@@ -17,13 +21,17 @@ export interface ResearchUIPreferences {
   }
 }
 
-const STORAGE_KEY = "bolzano:research-ui-preferences:v1"
-
-export const DEFAULT_TRANSPORT_VISIBILITY: TransportVisibility = {
-  openrouter: true,
-  codex_cli: true,
-  opencode_cli: true,
+export interface ResearchUIPreferences {
+  model_visibility: ModelVisibility
+  default_models: {
+    prover: ModelConfig
+    verifier: ModelConfig
+    summarizer: ModelConfig
+  }
 }
+
+const STORAGE_KEY_V2 = "bolzano:research-ui-preferences:v2"
+const STORAGE_KEY_V1 = "bolzano:research-ui-preferences:v1"
 
 const HARD_DEFAULTS: ResearchUIPreferences["default_models"] = {
   prover: {
@@ -44,15 +52,28 @@ const HARD_DEFAULTS: ResearchUIPreferences["default_models"] = {
 }
 
 export function load_research_ui_preferences(): ResearchUIPreferences {
-  const raw = read_storage()
-  return normalize_research_ui_preferences(raw)
+  const v2_raw = read_storage<Partial<ResearchUIPreferences>>(STORAGE_KEY_V2)
+  if (v2_raw) return normalize_research_ui_preferences(v2_raw)
+
+  // Best-effort migration from legacy transport-level settings.
+  const v1_raw = read_storage<Partial<LegacyResearchUIPreferences>>(STORAGE_KEY_V1)
+  if (v1_raw) {
+    const migrated = normalize_research_ui_preferences({
+      model_visibility: map_legacy_transport_visibility_to_models(v1_raw.transport_visibility),
+      default_models: v1_raw.default_models,
+    })
+    save_research_ui_preferences(migrated)
+    return migrated
+  }
+
+  return normalize_research_ui_preferences(null)
 }
 
 export function normalize_research_ui_preferences(raw: Partial<ResearchUIPreferences> | null | undefined): ResearchUIPreferences {
-  const visibility = normalize_transport_visibility(raw?.transport_visibility)
+  const visibility = normalize_model_visibility(raw?.model_visibility)
 
   return {
-    transport_visibility: visibility,
+    model_visibility: visibility,
     default_models: {
       prover: sanitize_model_for_role(raw?.default_models?.prover, "prover", visibility),
       verifier: sanitize_model_for_role(raw?.default_models?.verifier, "verifier", visibility),
@@ -63,20 +84,19 @@ export function normalize_research_ui_preferences(raw: Partial<ResearchUIPrefere
 
 export function save_research_ui_preferences(preferences: ResearchUIPreferences) {
   if (typeof localStorage === "undefined") return
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(normalize_research_ui_preferences(preferences)))
+  localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(normalize_research_ui_preferences(preferences)))
 }
 
-export function get_available_model_ids_for_role(role: "prover" | "verifier" | "summarizer", visibility: TransportVisibility): ModelID[] {
+export function get_available_model_ids_for_role(role: "prover" | "verifier" | "summarizer", visibility: ModelVisibility): ModelID[] {
   type ModelEntry = {
     id: ModelID
-    transport?: Transport
     structured_output: boolean
   }
 
   const ids: ModelID[] = []
   for (const provider_models of Object.values(models) as Array<readonly ModelEntry[]>) {
     for (const model of provider_models) {
-      if (!is_transport_visible(model.transport ?? "openrouter", visibility)) continue
+      if (visibility[model.id] === false) continue
       if (role !== "prover" && !model.structured_output) continue
       ids.push(model.id)
     }
@@ -84,33 +104,60 @@ export function get_available_model_ids_for_role(role: "prover" | "verifier" | "
   return ids
 }
 
-function is_transport_visible(transport: Transport, visibility: TransportVisibility) {
-  return visibility[transport]
+function all_model_ids() {
+  const ids: ModelID[] = []
+  for (const provider_models of Object.values(models) as Array<Array<{ id: ModelID }>>) {
+    for (const model of provider_models) ids.push(model.id)
+  }
+  return ids
 }
 
-function normalize_transport_visibility(input: unknown): TransportVisibility {
-  const candidate = input as Partial<TransportVisibility> | null | undefined
+function fallback_model_id() {
+  const ids = all_model_ids()
+  return (ids.includes("gpt-5.2") ? "gpt-5.2" : ids[0]) as ModelID
+}
 
-  const normalized: TransportVisibility = {
-    openrouter: candidate?.openrouter !== false,
-    codex_cli: candidate?.codex_cli !== false,
-    opencode_cli: candidate?.opencode_cli !== false,
+function normalize_model_visibility(input: unknown): ModelVisibility {
+  const candidate = (input && typeof input === "object" ? input : {}) as Partial<Record<ModelID, unknown>>
+  const normalized = {} as ModelVisibility
+
+  for (const id of all_model_ids()) {
+    normalized[id] = candidate[id] !== false
   }
 
-  if (!normalized.openrouter && !normalized.codex_cli && !normalized.opencode_cli) {
-    return {
-      ...normalized,
-      codex_cli: true,
-    }
+  const has_any_enabled = Object.values(normalized).some(Boolean)
+  if (!has_any_enabled) {
+    normalized[fallback_model_id()] = true
   }
 
   return normalized
 }
 
+function map_legacy_transport_visibility_to_models(input: unknown): ModelVisibility {
+  const candidate = (input && typeof input === "object" ? input : {}) as Partial<LegacyTransportVisibility>
+  const defaults: LegacyTransportVisibility = {
+    openrouter: candidate.openrouter !== false,
+    codex_cli: candidate.codex_cli !== false,
+    opencode_cli: candidate.opencode_cli !== false,
+    claude_cli: candidate.claude_cli !== false,
+    metacentrum_openai: candidate.metacentrum_openai !== false,
+  }
+
+  const visibility = {} as ModelVisibility
+  for (const provider_models of Object.values(models) as Array<Array<{ id: ModelID, transport?: Transport }>>) {
+    for (const model of provider_models) {
+      const transport = model.transport ?? "openrouter"
+      visibility[model.id] = defaults[transport]
+    }
+  }
+
+  return normalize_model_visibility(visibility)
+}
+
 function sanitize_model_for_role(
   input: unknown,
   role: "prover" | "verifier" | "summarizer",
-  visibility: TransportVisibility,
+  visibility: ModelVisibility,
 ): ModelConfig {
   const candidate = input as Partial<ModelConfig> | null | undefined
   const available_ids = get_available_model_ids_for_role(role, visibility)
@@ -188,15 +235,15 @@ function normalize_reasoning(
   return default_reasoning(config)
 }
 
-function read_storage(): Partial<ResearchUIPreferences> | null {
+function read_storage<T>(key: string): T | null {
   if (typeof localStorage === "undefined") return null
-  const raw = localStorage.getItem(STORAGE_KEY)
+  const raw = localStorage.getItem(key)
   if (!raw) return null
 
   try {
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== "object") return null
-    return parsed as Partial<ResearchUIPreferences>
+    return parsed as T
   } catch {
     return null
   }

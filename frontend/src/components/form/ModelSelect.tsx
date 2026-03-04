@@ -5,7 +5,7 @@ import { z } from "zod"
 
 import { models, get_model_by_id, provider_details } from "@shared/types/research"
 import type { ModelID, ReasoningEffort, ReasoningConfig, ReasoningEffortValue, Provider, ModelConfig } from "@shared/types/research"
-import type { TransportVisibility } from "@frontend/utils/research_preferences"
+import type { ModelVisibility } from "@frontend/utils/research_preferences"
 import ProviderLogo from "@frontend/components/svg/ProviderLogo"
 import ReasoningTag from "@frontend/components/problem/ReasoningTag"
 import WebSearchTag from "@frontend/components/problem/WebSearchTag"
@@ -15,7 +15,7 @@ interface ModelSelectProps {
   onChange: (value: ModelConfig) => void,
   trigger_style?: string,
   role: "prover" | "verifier" | "summarizer",
-  transport_visibility?: TransportVisibility,
+  model_visibility?: ModelVisibility,
 }
 
 export default function ModelSelect({
@@ -23,17 +23,12 @@ export default function ModelSelect({
   onChange,
   trigger_style,
   role,
-  transport_visibility = {
-    openrouter: true,
-    codex_cli: true,
-    opencode_cli: true,
-  },
+  model_visibility = {},
 }: ModelSelectProps) {
   type ModelEntry = {
     id: ModelID
     name: string
     provider: string
-    transport?: "openrouter" | "codex_cli" | "opencode_cli"
     structured_output: boolean
     price: { input: number, output: number }
   }
@@ -164,9 +159,8 @@ export default function ModelSelect({
               const visible_models = provider_models.filter((model) => {
                 const is_selected = selected?.id === model.id
                 const show_by_role = role === "prover" || model.structured_output
-                const transport = model.transport ?? "openrouter"
-                const show_by_transport = transport_visibility[transport]
-                return show_by_role && (show_by_transport || is_selected)
+                const is_visible = model_visibility[model.id] !== false
+                return show_by_role && (is_visible || is_selected)
               })
               return { provider, visible_models }
             })
@@ -181,6 +175,7 @@ export default function ModelSelect({
 
               {visible_models.map(model => {
                 const is_selected = selected?.id === model.id
+                const is_hidden = model_visibility[model.id] === false
                 return (
                   <ListBox.Item
                     key={model.id}
@@ -191,11 +186,16 @@ export default function ModelSelect({
                     }`}
                     >
                     <div className="flex flex-col">
-                      <p className={`font-medium ${
+                      <p className={`font-medium flex items-center gap-1.5 ${
                           is_selected ? "text-(--accent-alpha)" : ""
                         }`}
                       >
-                      {model.name}
+                        <span>{model.name}</span>
+                        {is_hidden && (
+                          <span className="text-[10px] px-1 py-0.5 rounded bg-amber-200 text-amber-800">
+                            hidden
+                          </span>
+                        )}
                       </p>
                       <p className="flex gap-1.5 text-xs">
                         in <span className="font-medium">${model.price.input}</span>

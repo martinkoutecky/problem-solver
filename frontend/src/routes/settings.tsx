@@ -9,9 +9,11 @@ import {
   update_my_profile,
   set_openrouter_key,
   delete_openrouter_key,
+  set_metacentrum_key,
+  delete_metacentrum_key,
   redeem_invite,
 } from "../api/profile"
-import { is_admin, user_name_schema, openrouter_api_key_schema, INVITE_CODE_LENGTH } from "@shared/auth"
+import { is_admin, user_name_schema, openrouter_api_key_schema, metacentrum_api_key_schema, INVITE_CODE_LENGTH } from "@shared/auth"
 import type { KeySource, User } from "@shared/auth"
 import {
   Form,
@@ -32,12 +34,14 @@ import {
 import { Icon } from "@iconify/react"
 import { SignOut } from "../components/auth/SignOut"
 import ModelSelect from "@frontend/components/form/ModelSelect"
+import { models, provider_details, type ModelID, type Provider } from "@shared/types/research"
 import {
   load_research_ui_preferences,
   normalize_research_ui_preferences,
   save_research_ui_preferences,
   type ResearchUIPreferences,
-  type TransportVisibility,
+  type ModelVisibility,
+  type Transport,
 } from "@frontend/utils/research_preferences"
 
 export const Route = createFileRoute("/settings")({
@@ -74,6 +78,9 @@ function SettingsPage() {
         key_source={profile.key_source}
         is_admin={profile.role === "admin"}/>
 
+      <MetaCentrumKeySection
+        has_key={profile.has_metacentrum_key}/>
+
       <ResearchUIPreferencesSection/>
 
       <section className="flex flex-col gap-4 max-w-lg">
@@ -82,6 +89,15 @@ function SettingsPage() {
       </section>
     </main>
   )
+}
+
+function get_api_error_message(error: unknown, fallback: string) {
+  if (error && typeof error === "object") {
+    const maybe = error as { message?: unknown, value?: { message?: unknown } }
+    if (typeof maybe.message === "string" && maybe.message.length > 0) return maybe.message
+    if (typeof maybe.value?.message === "string" && maybe.value.message.length > 0) return maybe.value.message
+  }
+  return fallback
 }
 
 interface ProfileSectionProps {
@@ -186,6 +202,105 @@ interface OpenRouterKeySectionProps {
   has_key: boolean,
   key_source: KeySource,
   is_admin: boolean,
+}
+
+function MetaCentrumKeySection({ has_key }: { has_key: boolean }) {
+  const query_client = useQueryClient()
+  const { register, handleSubmit, formState: { errors }, reset } = useForm({
+    defaultValues: { api_key: "" },
+    resolver: zodResolver(z.object({
+      api_key: metacentrum_api_key_schema
+    })),
+  })
+
+  const save_mutation = useMutation({
+    mutationFn: set_metacentrum_key,
+    onSuccess: () => {
+      query_client.invalidateQueries({ queryKey: ["profile", "me"] })
+      reset()
+    },
+  })
+
+  const delete_mutation = useMutation({
+    mutationFn: delete_metacentrum_key,
+    onSuccess: () => {
+      query_client.invalidateQueries({ queryKey: ["profile", "me"] })
+    },
+  })
+
+  return (
+    <section className="flex flex-col gap-4 max-w-lg">
+      <h2>MetaCentrum API Key</h2>
+
+      <section className="flex flex-col gap-4">
+        {has_key ? (
+          <>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-full bg-beta text-sm">
+              <Icon icon="gravity-ui:circle-check-fill" className="text-success"/>
+              <span className="text-success font-medium">API key configured</span>
+            </div>
+
+            <AlertDialog>
+              <Button variant="danger-soft">Remove Key</Button>
+              <AlertDialog.Backdrop isDismissable>
+                <AlertDialog.Container>
+                  <AlertDialog.Dialog className="max-w-sm">
+                    <AlertDialog.CloseTrigger/>
+                    <AlertDialog.Header>
+                      <AlertDialog.Icon status="danger"/>
+                      <AlertDialog.Heading className="font-sans">Remove MetaCentrum key?</AlertDialog.Heading>
+                    </AlertDialog.Header>
+                    <AlertDialog.Body className="flex flex-col gap-4 p-1">
+                      <p>This will disable MetaCentrum models in new runs.</p>
+                    </AlertDialog.Body>
+                    <AlertDialog.Footer>
+                      <Button variant="ghost" slot="close" isDisabled={delete_mutation.isPending}>
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="danger"
+                        isDisabled={delete_mutation.isPending}
+                        isPending={delete_mutation.isPending}
+                        onPress={() => delete_mutation.mutate()}>
+                        Remove
+                      </Button>
+                    </AlertDialog.Footer>
+                  </AlertDialog.Dialog>
+                </AlertDialog.Container>
+              </AlertDialog.Backdrop>
+            </AlertDialog>
+          </>
+        ) : (
+          <Form onSubmit={handleSubmit(data => save_mutation.mutate(data.api_key))}
+            className="flex flex-col gap-4">
+            <TextField isInvalid={!!errors.api_key}>
+              <Label>MetaCentrum API Key</Label>
+              <Input type="password" {...register("api_key")} />
+              <FieldError>{errors.api_key?.message}</FieldError>
+            </TextField>
+
+            {save_mutation.isError && (
+              <Alert status="danger">
+                <Alert.Indicator/>
+                <Alert.Content>
+                  <Alert.Title>Failed to save MetaCentrum API key</Alert.Title>
+                  <Alert.Description>
+                    {get_api_error_message(save_mutation.error, "Failed to save MetaCentrum API key.")}
+                  </Alert.Description>
+                </Alert.Content>
+              </Alert>
+            )}
+
+            <Button type="submit"
+              isPending={save_mutation.isPending}
+              isDisabled={save_mutation.isPending}>
+              Save Key
+            </Button>
+          </Form>
+        )}
+      </section>
+    </section>
+  )
 }
 
 function OpenRouterKeySection({ has_key, key_source, is_admin }: OpenRouterKeySectionProps) {
@@ -449,6 +564,12 @@ const APIKeyEncryptionNote = () => (
 
 function ResearchUIPreferencesSection() {
   const [preferences, setPreferences] = useState<ResearchUIPreferences>(() => load_research_ui_preferences())
+  type VisibleModelEntry = {
+    id: ModelID,
+    name: string,
+    transport?: Transport,
+    structured_output: boolean,
+  }
 
   const update_preferences = (next: ResearchUIPreferences) => {
     const normalized = normalize_research_ui_preferences(next)
@@ -456,56 +577,104 @@ function ResearchUIPreferencesSection() {
     save_research_ui_preferences(normalized)
   }
 
-  const set_transport = (transport: keyof TransportVisibility, value: boolean) => {
-    const next_visibility: TransportVisibility = {
-      ...preferences.transport_visibility,
-      [transport]: value,
+  const model_entries = (Object.entries(models) as [Provider, readonly VisibleModelEntry[]][])
+    .map(([provider, provider_models]) => ({ provider, models: provider_models }))
+
+  const all_model_ids = model_entries.flatMap(group => group.models.map(model => model.id))
+
+  const set_model_visible = (model_id: ModelID, value: boolean) => {
+    const next_visibility: ModelVisibility = {
+      ...preferences.model_visibility,
+      [model_id]: value,
     }
 
-    if (!next_visibility.openrouter && !next_visibility.codex_cli && !next_visibility.opencode_cli) {
-      next_visibility.codex_cli = true
+    const has_any_visible = all_model_ids.some(id => next_visibility[id] !== false)
+    if (!has_any_visible) {
+      next_visibility["gpt-5.2"] = true
     }
 
     update_preferences({
       ...preferences,
-      transport_visibility: next_visibility,
+      model_visibility: next_visibility,
+    })
+  }
+
+  const set_all_models = (value: boolean) => {
+    const next_visibility = { ...preferences.model_visibility }
+    for (const model_id of all_model_ids) next_visibility[model_id] = value
+    if (!value) next_visibility["gpt-5.2"] = true
+
+    update_preferences({
+      ...preferences,
+      model_visibility: next_visibility,
+    })
+  }
+
+  const set_transport_models = (transport: Transport, value: boolean) => {
+    const next_visibility = { ...preferences.model_visibility }
+    for (const group of model_entries) {
+      for (const model of group.models) {
+        const model_transport = model.transport ?? "openrouter"
+        if (model_transport === transport) next_visibility[model.id] = value
+      }
+    }
+
+    const has_any_visible = all_model_ids.some(id => next_visibility[id] !== false)
+    if (!has_any_visible) next_visibility["gpt-5.2"] = true
+
+    update_preferences({
+      ...preferences,
+      model_visibility: next_visibility,
     })
   }
 
   return (
-    <section className="flex flex-col gap-4 max-w-lg">
+    <section className="flex flex-col gap-4 max-w-2xl">
       <h2>Research UI</h2>
 
       <div className="flex flex-col gap-3">
-        <p className="text-sm">Visible model transports in selectors</p>
-        <div className="grid grid-cols-1 gap-2">
-          <Switch
-            isSelected={preferences.transport_visibility.codex_cli}
-            onChange={(value) => set_transport("codex_cli", value)}
-            className="flex justify-between items-center w-full">
-            <p className="text-sm">Show Codex (local)</p>
-            <Switch.Control>
-              <Switch.Thumb/>
-            </Switch.Control>
-          </Switch>
-          <Switch
-            isSelected={preferences.transport_visibility.opencode_cli}
-            onChange={(value) => set_transport("opencode_cli", value)}
-            className="flex justify-between items-center w-full">
-            <p className="text-sm">Show OpenCode (local)</p>
-            <Switch.Control>
-              <Switch.Thumb/>
-            </Switch.Control>
-          </Switch>
-          <Switch
-            isSelected={preferences.transport_visibility.openrouter}
-            onChange={(value) => set_transport("openrouter", value)}
-            className="flex justify-between items-center w-full">
-            <p className="text-sm">Show OpenRouter</p>
-            <Switch.Control>
-              <Switch.Thumb/>
-            </Switch.Control>
-          </Switch>
+        <p className="text-sm">Visible models in selector dropdowns</p>
+
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" onPress={() => set_all_models(true)}>
+            Enable All
+          </Button>
+          <Button size="sm" variant="secondary" onPress={() => set_transport_models("openrouter", false)}>
+            Disable OpenRouter
+          </Button>
+          <Button size="sm" variant="secondary" onPress={() => set_all_models(false)}>
+            Disable All (Keep Fallback)
+          </Button>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          {model_entries.map(group => (
+            <div key={group.provider} className="flex flex-col gap-2">
+              <p className="text-sm font-semibold">{provider_details[group.provider].name}</p>
+
+              {group.models.map(model => {
+                const is_visible = preferences.model_visibility[model.id] !== false
+                const transport = model.transport ?? "openrouter"
+                return (
+                  <Switch
+                    key={model.id}
+                    isSelected={is_visible}
+                    onChange={(value) => set_model_visible(model.id, value)}
+                    className="flex justify-between items-center w-full gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm truncate">{model.name}</p>
+                      <p className="text-xs text-ink-2">
+                        {transport}{model.structured_output ? " • structured" : " • text-only"}
+                      </p>
+                    </div>
+                    <Switch.Control>
+                      <Switch.Thumb/>
+                    </Switch.Control>
+                  </Switch>
+                )
+              })}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -519,7 +688,7 @@ function ResearchUIPreferencesSection() {
           <ModelSelect
             role="prover"
             selected={preferences.default_models.prover}
-            transport_visibility={preferences.transport_visibility}
+            model_visibility={preferences.model_visibility}
             onChange={(model) => update_preferences({
               ...preferences,
               default_models: { ...preferences.default_models, prover: model },
@@ -531,7 +700,7 @@ function ResearchUIPreferencesSection() {
           <ModelSelect
             role="verifier"
             selected={preferences.default_models.verifier}
-            transport_visibility={preferences.transport_visibility}
+            model_visibility={preferences.model_visibility}
             onChange={(model) => update_preferences({
               ...preferences,
               default_models: { ...preferences.default_models, verifier: model },
@@ -543,7 +712,7 @@ function ResearchUIPreferencesSection() {
           <ModelSelect
             role="summarizer"
             selected={preferences.default_models.summarizer}
-            transport_visibility={preferences.transport_visibility}
+            model_visibility={preferences.model_visibility}
             onChange={(model) => update_preferences({
               ...preferences,
               default_models: { ...preferences.default_models, summarizer: model },

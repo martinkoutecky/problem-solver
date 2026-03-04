@@ -278,7 +278,7 @@ function RunNewResearchPage() {
                     render={({ field }) => (
                       <ModelSelect trigger_style="rounded-none h-full flex-center bg-alpha shadow-none pl-2"
                         role="prover"
-                        transport_visibility={research_ui_preferences.transport_visibility}
+                        model_visibility={research_ui_preferences.model_visibility}
                         selected={field.value}
                         onChange={field.onChange}/>
                     )}
@@ -299,7 +299,7 @@ function RunNewResearchPage() {
                 control={control}
                 render={({ field }) => (
                   <ModelSelect role="verifier"
-                    transport_visibility={research_ui_preferences.transport_visibility}
+                    model_visibility={research_ui_preferences.model_visibility}
                     selected={field.value}
                     onChange={field.onChange}/>
                 )}/>
@@ -314,7 +314,7 @@ function RunNewResearchPage() {
                 control={control}
                 render={({ field }) => (
                   <ModelSelect role="summarizer"
-                    transport_visibility={research_ui_preferences.transport_visibility}
+                    model_visibility={research_ui_preferences.model_visibility}
                     selected={field.value}
                     onChange={field.onChange}/>
                 )}/>
