@@ -66,6 +66,7 @@ class CookieJar {
 }
 
 const MODEL_ALIASES: Record<string, ModelID> = {
+  "gpt-5.4": "gpt-5.4",
   "gpt-5.2": "gpt-5.2",
   "gpt-5.3-codex": "gpt-5.3-codex",
   "gemini-3-pro": "opencode/google/gemini-3-pro-preview",
