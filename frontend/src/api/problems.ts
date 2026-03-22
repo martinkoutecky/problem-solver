@@ -1,4 +1,5 @@
 import { api } from "./index"
+import type { ProblemChatRequest } from "@shared/types/chat"
 
 function as_error(error: unknown, fallback_message: string) {
   if (error instanceof Error) {
@@ -130,5 +131,14 @@ export async function get_main_files_history(problem_id: string): Promise<MainFi
   const response = await api.problems.main_files_history({ problem_id }).get()
   if (response.error || response.data === null) throw as_error(response.error, "Failed to load main files history.")
   if (response.data === "No Content") return []
+  return response.data
+}
+
+/**
+ * Generates a no-tool-call problem chat reply from packed research context.
+ */
+export async function chat_about_problem(problem_id: string, body: ProblemChatRequest) {
+  const response = await api.problems.chat({ problem_id }).post(body)
+  if (response.error || response.data === null) throw as_error(response.error, "Failed to generate problem chat reply.")
   return response.data
 }

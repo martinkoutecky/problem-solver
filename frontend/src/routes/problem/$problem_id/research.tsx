@@ -29,6 +29,8 @@ import ModelSelect from "@frontend/components/form/ModelSelect"
 import ProviderLogo from "@frontend/components/svg/ProviderLogo"
 
 import { useAuthStore } from "@frontend/auth/store"
+import { get_model_visibility } from "@frontend/api/profile"
+import type { ModelVisibility } from "@shared/admin/models"
 import { load_research_ui_preferences } from "@frontend/utils/research_preferences"
 
 export const Route = createFileRoute("/problem/$problem_id/research")({
@@ -74,6 +76,37 @@ const default_system_prompts = {
 
 function RunNewResearchPage() {
   const { problem_id } = Route.useParams()
+  const {
+    data: model_settings,
+    isPending,
+    isError,
+    error,
+  } = useQuery({
+    queryKey: ["profile", "model-visibility"],
+    queryFn: get_model_visibility,
+  })
+
+  if (isPending) return (
+    <ProblemDetailsLayout problem_id={problem_id} problem_name="" loading>
+      <p>Loading research run config...</p>
+    </ProblemDetailsLayout>
+  )
+
+  if (isError || !model_settings) return (
+    <main className="flex-1 flex-center">
+      <p>Failed to load model visibility: {error?.message}</p>
+    </main>
+  )
+
+  return <RunNewResearchPageContent model_visibility={model_settings.model_visibility}/>
+}
+
+interface RunNewResearchPageContentProps {
+  model_visibility: ModelVisibility,
+}
+
+function RunNewResearchPageContent({ model_visibility }: RunNewResearchPageContentProps) {
+  const { problem_id } = Route.useParams()
   const navigate = useNavigate()
   const query_client = useQueryClient()
   const { profile, is_loading } = useAuthStore()
@@ -87,7 +120,10 @@ function RunNewResearchPage() {
 
   const [selected_editor, setSelectedEditor] = useState<EditorSelection>("round_instructions")
   const [pending_data, setPendingData] = useState<NewStandardResearchType | null>(null)
-  const research_ui_preferences = useMemo(() => load_research_ui_preferences(), [])
+  const research_ui_preferences = useMemo(
+    () => load_research_ui_preferences(model_visibility),
+    [model_visibility]
+  )
 
   const research_modal_controller = useOverlayState()
 
@@ -278,7 +314,7 @@ function RunNewResearchPage() {
                     render={({ field }) => (
                       <ModelSelect trigger_style="rounded-none h-full flex-center bg-alpha shadow-none pl-2"
                         role="prover"
-                        model_visibility={research_ui_preferences.model_visibility}
+                        model_visibility={model_visibility}
                         selected={field.value}
                         onChange={field.onChange}/>
                     )}
@@ -299,7 +335,7 @@ function RunNewResearchPage() {
                 control={control}
                 render={({ field }) => (
                   <ModelSelect role="verifier"
-                    model_visibility={research_ui_preferences.model_visibility}
+                    model_visibility={model_visibility}
                     selected={field.value}
                     onChange={field.onChange}/>
                 )}/>
@@ -314,7 +350,7 @@ function RunNewResearchPage() {
                 control={control}
                 render={({ field }) => (
                   <ModelSelect role="summarizer"
-                    model_visibility={research_ui_preferences.model_visibility}
+                    model_visibility={model_visibility}
                     selected={field.value}
                     onChange={field.onChange}/>
                 )}/>

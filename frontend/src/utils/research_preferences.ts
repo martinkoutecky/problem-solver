@@ -1,19 +1,11 @@
-import { get_model_by_id, models, type ModelConfig, type ModelID, type ReasoningConfig, type ReasoningEffort, type ReasoningEffortValue } from "@shared/types/research"
-
-export type Transport = "openrouter" | "codex_cli" | "opencode_cli" | "claude_cli" | "metacentrum_openai"
-
-export type ModelVisibility = Record<ModelID, boolean>
-
-interface LegacyTransportVisibility {
-  openrouter: boolean
-  codex_cli: boolean
-  opencode_cli: boolean
-  claude_cli: boolean
-  metacentrum_openai: boolean
-}
+import { get_model_by_id, type ModelConfig, type ModelID, type ReasoningConfig, type ReasoningEffort, type ReasoningEffortValue } from "@shared/types/research"
+import {
+  get_available_model_ids_for_role,
+  normalize_model_visibility,
+  type ModelVisibility,
+} from "@shared/admin/models"
 
 interface LegacyResearchUIPreferences {
-  transport_visibility: LegacyTransportVisibility
   default_models: {
     prover: ModelConfig
     verifier: ModelConfig
@@ -22,7 +14,6 @@ interface LegacyResearchUIPreferences {
 }
 
 export interface ResearchUIPreferences {
-  model_visibility: ModelVisibility
   default_models: {
     prover: ModelConfig
     verifier: ModelConfig
@@ -30,6 +21,7 @@ export interface ResearchUIPreferences {
   }
 }
 
+const STORAGE_KEY_V3 = "bolzano:research-ui-preferences:v3"
 const STORAGE_KEY_V2 = "bolzano:research-ui-preferences:v2"
 const STORAGE_KEY_V1 = "bolzano:research-ui-preferences:v1"
 
@@ -51,29 +43,37 @@ const HARD_DEFAULTS: ResearchUIPreferences["default_models"] = {
   },
 }
 
-export function load_research_ui_preferences(): ResearchUIPreferences {
-  const v2_raw = read_storage<Partial<ResearchUIPreferences>>(STORAGE_KEY_V2)
-  if (v2_raw) return normalize_research_ui_preferences(v2_raw)
+export function load_research_ui_preferences(visibility: ModelVisibility): ResearchUIPreferences {
+  const v3_raw = read_storage<Partial<ResearchUIPreferences>>(STORAGE_KEY_V3)
+  if (v3_raw) return normalize_research_ui_preferences(v3_raw, visibility)
 
-  // Best-effort migration from legacy transport-level settings.
-  const v1_raw = read_storage<Partial<LegacyResearchUIPreferences>>(STORAGE_KEY_V1)
-  if (v1_raw) {
+  const v2_raw = read_storage<Partial<ResearchUIPreferences>>(STORAGE_KEY_V2)
+  if (v2_raw) {
     const migrated = normalize_research_ui_preferences({
-      model_visibility: map_legacy_transport_visibility_to_models(v1_raw.transport_visibility),
-      default_models: v1_raw.default_models,
-    })
-    save_research_ui_preferences(migrated)
+      default_models: v2_raw.default_models,
+    }, visibility)
+    save_research_ui_preferences(migrated, visibility)
     return migrated
   }
 
-  return normalize_research_ui_preferences(null)
+  const v1_raw = read_storage<Partial<LegacyResearchUIPreferences>>(STORAGE_KEY_V1)
+  if (v1_raw) {
+    const migrated = normalize_research_ui_preferences({
+      default_models: v1_raw.default_models,
+    }, visibility)
+    save_research_ui_preferences(migrated, visibility)
+    return migrated
+  }
+
+  return normalize_research_ui_preferences(null, visibility)
 }
 
-export function normalize_research_ui_preferences(raw: Partial<ResearchUIPreferences> | null | undefined): ResearchUIPreferences {
-  const visibility = normalize_model_visibility(raw?.model_visibility)
-
+export function normalize_research_ui_preferences(
+  raw: Partial<ResearchUIPreferences> | null | undefined,
+  visibility_input: ModelVisibility,
+): ResearchUIPreferences {
+  const visibility = normalize_model_visibility(visibility_input)
   return {
-    model_visibility: visibility,
     default_models: {
       prover: sanitize_model_for_role(raw?.default_models?.prover, "prover", visibility),
       verifier: sanitize_model_for_role(raw?.default_models?.verifier, "verifier", visibility),
@@ -82,76 +82,12 @@ export function normalize_research_ui_preferences(raw: Partial<ResearchUIPrefere
   }
 }
 
-export function save_research_ui_preferences(preferences: ResearchUIPreferences) {
+export function save_research_ui_preferences(preferences: ResearchUIPreferences, visibility: ModelVisibility) {
   if (typeof localStorage === "undefined") return
-  localStorage.setItem(STORAGE_KEY_V2, JSON.stringify(normalize_research_ui_preferences(preferences)))
-}
-
-export function get_available_model_ids_for_role(role: "prover" | "verifier" | "summarizer", visibility: ModelVisibility): ModelID[] {
-  type ModelEntry = {
-    id: ModelID
-    structured_output: boolean
-  }
-
-  const ids: ModelID[] = []
-  for (const provider_models of Object.values(models) as Array<readonly ModelEntry[]>) {
-    for (const model of provider_models) {
-      if (visibility[model.id] === false) continue
-      if (role !== "prover" && !model.structured_output) continue
-      ids.push(model.id)
-    }
-  }
-  return ids
-}
-
-function all_model_ids() {
-  const ids: ModelID[] = []
-  for (const provider_models of Object.values(models) as Array<Array<{ id: ModelID }>>) {
-    for (const model of provider_models) ids.push(model.id)
-  }
-  return ids
-}
-
-function fallback_model_id() {
-  const ids = all_model_ids()
-  return (ids.includes("gpt-5.2") ? "gpt-5.2" : ids[0]) as ModelID
-}
-
-function normalize_model_visibility(input: unknown): ModelVisibility {
-  const candidate = (input && typeof input === "object" ? input : {}) as Partial<Record<ModelID, unknown>>
-  const normalized = {} as ModelVisibility
-
-  for (const id of all_model_ids()) {
-    normalized[id] = candidate[id] !== false
-  }
-
-  const has_any_enabled = Object.values(normalized).some(Boolean)
-  if (!has_any_enabled) {
-    normalized[fallback_model_id()] = true
-  }
-
-  return normalized
-}
-
-function map_legacy_transport_visibility_to_models(input: unknown): ModelVisibility {
-  const candidate = (input && typeof input === "object" ? input : {}) as Partial<LegacyTransportVisibility>
-  const defaults: LegacyTransportVisibility = {
-    openrouter: candidate.openrouter !== false,
-    codex_cli: candidate.codex_cli !== false,
-    opencode_cli: candidate.opencode_cli !== false,
-    claude_cli: candidate.claude_cli !== false,
-    metacentrum_openai: candidate.metacentrum_openai !== false,
-  }
-
-  const visibility = {} as ModelVisibility
-  for (const provider_models of Object.values(models) as Array<Array<{ id: ModelID, transport?: Transport }>>) {
-    for (const model of provider_models) {
-      const transport = model.transport ?? "openrouter"
-      visibility[model.id] = defaults[transport]
-    }
-  }
-
-  return normalize_model_visibility(visibility)
+  localStorage.setItem(
+    STORAGE_KEY_V3,
+    JSON.stringify(normalize_research_ui_preferences(preferences, visibility))
+  )
 }
 
 function sanitize_model_for_role(

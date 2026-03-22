@@ -4,8 +4,8 @@ import { Icon } from "@iconify/react"
 import { z } from "zod"
 
 import { models, get_model_by_id, provider_details } from "@shared/types/research"
+import type { ModelVisibility } from "@shared/admin/models"
 import type { ModelID, ReasoningEffort, ReasoningConfig, ReasoningEffortValue, Provider, ModelConfig } from "@shared/types/research"
-import type { ModelVisibility } from "@frontend/utils/research_preferences"
 import ProviderLogo from "@frontend/components/svg/ProviderLogo"
 import ReasoningTag from "@frontend/components/problem/ReasoningTag"
 import WebSearchTag from "@frontend/components/problem/WebSearchTag"
@@ -14,8 +14,8 @@ interface ModelSelectProps {
   selected?: ModelConfig,
   onChange: (value: ModelConfig) => void,
   trigger_style?: string,
-  role: "prover" | "verifier" | "summarizer",
-  model_visibility?: ModelVisibility,
+  role: "prover" | "verifier" | "summarizer" | "chat",
+  model_visibility?: Partial<ModelVisibility>,
 }
 
 export default function ModelSelect({
@@ -158,7 +158,7 @@ export default function ModelSelect({
             .map(([provider, provider_models]) => {
               const visible_models = provider_models.filter((model) => {
                 const is_selected = selected?.id === model.id
-                const show_by_role = role === "prover" || model.structured_output
+                const show_by_role = role === "prover" || role === "chat" || model.structured_output
                 const is_visible = model_visibility[model.id] !== false
                 return show_by_role && (is_visible || is_selected)
               })

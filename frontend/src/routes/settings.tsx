@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { useForm, Controller } from "react-hook-form"
@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import {
   get_my_profile,
+  get_model_visibility,
   update_my_profile,
   set_openrouter_key,
   delete_openrouter_key,
@@ -15,6 +16,7 @@ import {
 } from "../api/profile"
 import { is_admin, user_name_schema, openrouter_api_key_schema, metacentrum_api_key_schema, INVITE_CODE_LENGTH } from "@shared/auth"
 import type { KeySource, User } from "@shared/auth"
+import type { ModelVisibility } from "@shared/admin/models"
 import {
   Form,
   TextField,
@@ -33,15 +35,13 @@ import {
 } from "@heroui/react"
 import { Icon } from "@iconify/react"
 import { SignOut } from "../components/auth/SignOut"
+import BracketLink from "@frontend/components/action/BracketLink"
 import ModelSelect from "@frontend/components/form/ModelSelect"
-import { models, provider_details, type ModelID, type Provider } from "@shared/types/research"
 import {
   load_research_ui_preferences,
   normalize_research_ui_preferences,
   save_research_ui_preferences,
   type ResearchUIPreferences,
-  type ModelVisibility,
-  type Transport,
 } from "@frontend/utils/research_preferences"
 
 export const Route = createFileRoute("/settings")({
@@ -53,17 +53,26 @@ function SettingsPage() {
     queryKey: ["profile", "me"],
     queryFn: get_my_profile,
   })
+  const {
+    data: model_settings,
+    error: model_settings_error,
+    isError: model_settings_is_error,
+    isPending: model_settings_is_pending,
+  } = useQuery({
+    queryKey: ["profile", "model-visibility"],
+    queryFn: get_model_visibility,
+  })
 
-  if (isPending) return (
+  if (isPending || model_settings_is_pending) return (
     <main className="flex-1 flex-center flex-col gap-4">
       <Spinner/>
       <span>Loading settings...</span>
     </main>
   )
 
-  if (isError) return (
+  if (isError || model_settings_is_error || !model_settings) return (
     <main className="flex-1 flex-center">
-      <p>Error loading settings: {error?.message}</p>
+      <p>Error loading settings: {error?.message ?? model_settings_error?.message}</p>
     </main>
   )
 
@@ -81,7 +90,9 @@ function SettingsPage() {
       <MetaCentrumKeySection
         has_key={profile.has_metacentrum_key}/>
 
-      <ResearchUIPreferencesSection/>
+      <ResearchDefaultsSection
+        model_visibility={model_settings.model_visibility}
+        is_admin_user={profile.role === "admin"}/>
 
       <section className="flex flex-col gap-4 max-w-lg">
         <h2>Account</h2>
@@ -562,162 +573,71 @@ const APIKeyEncryptionNote = () => (
   </>
 )
 
-function ResearchUIPreferencesSection() {
-  const [preferences, setPreferences] = useState<ResearchUIPreferences>(() => load_research_ui_preferences())
-  type VisibleModelEntry = {
-    id: ModelID,
-    name: string,
-    transport?: Transport,
-    structured_output: boolean,
-  }
+interface ResearchDefaultsSectionProps {
+  model_visibility: ModelVisibility,
+  is_admin_user: boolean,
+}
+
+function ResearchDefaultsSection({ model_visibility, is_admin_user }: ResearchDefaultsSectionProps) {
+  const [preferences, setPreferences] = useState<ResearchUIPreferences>(() => load_research_ui_preferences(model_visibility))
+
+  useEffect(() => {
+    setPreferences(load_research_ui_preferences(model_visibility))
+  }, [model_visibility])
 
   const update_preferences = (next: ResearchUIPreferences) => {
-    const normalized = normalize_research_ui_preferences(next)
+    const normalized = normalize_research_ui_preferences(next, model_visibility)
     setPreferences(normalized)
-    save_research_ui_preferences(normalized)
-  }
-
-  const model_entries = (Object.entries(models) as [Provider, readonly VisibleModelEntry[]][])
-    .map(([provider, provider_models]) => ({ provider, models: provider_models }))
-
-  const all_model_ids = model_entries.flatMap(group => group.models.map(model => model.id))
-
-  const set_model_visible = (model_id: ModelID, value: boolean) => {
-    const next_visibility: ModelVisibility = {
-      ...preferences.model_visibility,
-      [model_id]: value,
-    }
-
-    const has_any_visible = all_model_ids.some(id => next_visibility[id] !== false)
-    if (!has_any_visible) {
-      next_visibility["gpt-5.2"] = true
-    }
-
-    update_preferences({
-      ...preferences,
-      model_visibility: next_visibility,
-    })
-  }
-
-  const set_all_models = (value: boolean) => {
-    const next_visibility = { ...preferences.model_visibility }
-    for (const model_id of all_model_ids) next_visibility[model_id] = value
-    if (!value) next_visibility["gpt-5.2"] = true
-
-    update_preferences({
-      ...preferences,
-      model_visibility: next_visibility,
-    })
-  }
-
-  const set_transport_models = (transport: Transport, value: boolean) => {
-    const next_visibility = { ...preferences.model_visibility }
-    for (const group of model_entries) {
-      for (const model of group.models) {
-        const model_transport = model.transport ?? "openrouter"
-        if (model_transport === transport) next_visibility[model.id] = value
-      }
-    }
-
-    const has_any_visible = all_model_ids.some(id => next_visibility[id] !== false)
-    if (!has_any_visible) next_visibility["gpt-5.2"] = true
-
-    update_preferences({
-      ...preferences,
-      model_visibility: next_visibility,
-    })
+    save_research_ui_preferences(normalized, model_visibility)
   }
 
   return (
     <section className="flex flex-col gap-4 max-w-2xl">
-      <h2>Research UI</h2>
+      <h2>Research Defaults</h2>
 
-      <div className="flex flex-col gap-3">
-        <p className="text-sm">Visible models in selector dropdowns</p>
-
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onPress={() => set_all_models(true)}>
-            Enable All
-          </Button>
-          <Button size="sm" variant="secondary" onPress={() => set_transport_models("openrouter", false)}>
-            Disable OpenRouter
-          </Button>
-          <Button size="sm" variant="secondary" onPress={() => set_all_models(false)}>
-            Disable All (Keep Fallback)
-          </Button>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          {model_entries.map(group => (
-            <div key={group.provider} className="flex flex-col gap-2">
-              <p className="text-sm font-semibold">{provider_details[group.provider].name}</p>
-
-              {group.models.map(model => {
-                const is_visible = preferences.model_visibility[model.id] !== false
-                const transport = model.transport ?? "openrouter"
-                return (
-                  <Switch
-                    key={model.id}
-                    isSelected={is_visible}
-                    onChange={(value) => set_model_visible(model.id, value)}
-                    className="flex justify-between items-center w-full gap-4">
-                    <div className="min-w-0">
-                      <p className="text-sm truncate">{model.name}</p>
-                      <p className="text-xs text-ink-2">
-                        {transport}{model.structured_output ? " • structured" : " • text-only"}
-                      </p>
-                    </div>
-                    <Switch.Control>
-                      <Switch.Thumb/>
-                    </Switch.Control>
-                  </Switch>
-                )
-              })}
-            </div>
-          ))}
-        </div>
+      <div className="flex flex-col gap-2">
+        <p className="text-sm">Default models for new research runs</p>
+        {is_admin_user && (
+          <p className="text-sm text-ink-2">
+            Model availability is managed globally in <BracketLink to="/admin/models">Admin Models</BracketLink>.
+          </p>
+        )}
       </div>
 
-      <Separator/>
+      <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
+        <Label>Prover</Label>
+        <ModelSelect
+          role="prover"
+          selected={preferences.default_models.prover}
+          model_visibility={model_visibility}
+          onChange={(model) => update_preferences({
+            ...preferences,
+            default_models: { ...preferences.default_models, prover: model },
+          })}/>
+      </div>
 
-      <div className="flex flex-col gap-3">
-        <p className="text-sm">Default models for new research runs</p>
+      <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
+        <Label>Verifier</Label>
+        <ModelSelect
+          role="verifier"
+          selected={preferences.default_models.verifier}
+          model_visibility={model_visibility}
+          onChange={(model) => update_preferences({
+            ...preferences,
+            default_models: { ...preferences.default_models, verifier: model },
+          })}/>
+      </div>
 
-        <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
-          <Label>Prover</Label>
-          <ModelSelect
-            role="prover"
-            selected={preferences.default_models.prover}
-            model_visibility={preferences.model_visibility}
-            onChange={(model) => update_preferences({
-              ...preferences,
-              default_models: { ...preferences.default_models, prover: model },
-            })}/>
-        </div>
-
-        <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
-          <Label>Verifier</Label>
-          <ModelSelect
-            role="verifier"
-            selected={preferences.default_models.verifier}
-            model_visibility={preferences.model_visibility}
-            onChange={(model) => update_preferences({
-              ...preferences,
-              default_models: { ...preferences.default_models, verifier: model },
-            })}/>
-        </div>
-
-        <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
-          <Label>Summarizer</Label>
-          <ModelSelect
-            role="summarizer"
-            selected={preferences.default_models.summarizer}
-            model_visibility={preferences.model_visibility}
-            onChange={(model) => update_preferences({
-              ...preferences,
-              default_models: { ...preferences.default_models, summarizer: model },
-            })}/>
-        </div>
+      <div className="grid grid-cols-[6rem_1fr] items-center gap-2">
+        <Label>Summarizer</Label>
+        <ModelSelect
+          role="summarizer"
+          selected={preferences.default_models.summarizer}
+          model_visibility={model_visibility}
+          onChange={(model) => update_preferences({
+            ...preferences,
+            default_models: { ...preferences.default_models, summarizer: model },
+          })}/>
       </div>
     </section>
   )

@@ -6,6 +6,8 @@ import { z } from "zod"
 import slugify from "slugify"
 
 import { INITIAL_MAIN_FILES, type ProblemRoundSumary, type ResearchRound } from "@shared/types/problem"
+import { ProblemChatRequestSchema } from "@shared/types/chat"
+import { generate_problem_chat_reply } from "@backend/problems/chat"
 import { format_raw_files_data, reconstruct_main_files_history } from "@backend/problems/index.utils"
 import { create_zip, divide_files_into_rounds } from "@backend/problems/download.utils"
 import { CreateProblemFormSchema } from "@shared/types/problem"
@@ -625,6 +627,56 @@ export const problems_router = new Elysia({ prefix: "/problems" })
         message: `Failed to retrieve files for problem with ID: '${problem_id}'.`
       })
     }
+  })
+
+  /**
+   * [AUTH] POST /problems/chat/:problem_id
+   *
+   * Generates a no-tool-call chat reply from packed problem context.
+   */
+  .post("/chat/:problem_id", async ({ db, user, params: { problem_id }, body, status }) => {
+    try {
+      const problem = await db.query.problems.findFirst({
+        columns: {
+          id: true,
+          owner_id: true,
+        },
+        where: eq(problems.id, problem_id),
+      })
+
+      if (!problem) return status(404, {
+        type: "error",
+        message: "Problem not found.",
+      })
+
+      if (problem.owner_id !== user.id && user.role !== "admin") {
+        return status(403, {
+          type: "error",
+          message: "You can only chat with your own problems.",
+        })
+      }
+
+      const reply = await generate_problem_chat_reply(db, user.id, problem_id, body)
+      if (!reply) return status(404, {
+        type: "error",
+        message: "Problem not found.",
+      })
+
+      return reply
+    } catch (error) {
+      return status(500, {
+        type: "error",
+        message: error instanceof Error
+          ? error.message
+          : "Failed to generate problem chat reply.",
+      })
+    }
+  }, {
+    isAuth: true,
+    body: ProblemChatRequestSchema,
+    params: z.object({
+      problem_id: z.uuid(),
+    }),
   })
 
   /**
