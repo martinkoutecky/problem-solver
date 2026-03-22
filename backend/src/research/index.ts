@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm"
 import { problems, rounds } from "../../drizzle/schema"
 
 import { user_has_openrouter_key } from "../openrouter/provider"
+import { user_has_metacentrum_key } from "../metacentrum/provider"
 import { NewStandardResearch, get_model_transport } from "@shared/types/research"
 
 export const research_router = new Elysia({ prefix: "/research" })
@@ -31,14 +32,23 @@ export const research_router = new Elysia({ prefix: "/research" })
       body.verifier.model.id,
       body.summarizer.model.id,
     ]
-    const requires_openrouter = selected_model_ids
-      .some(model_id => get_model_transport(model_id) === "openrouter")
+    const required_transports = new Set(
+      selected_model_ids.map(model_id => get_model_transport(model_id))
+    )
 
-    if (requires_openrouter) {
+    if (required_transports.has("openrouter")) {
       const has_openrouter_key = await user_has_openrouter_key(db, user.id)
       if (!has_openrouter_key) return status(403, {
         type: "error",
-        message: "Selected configuration includes OpenRouter models. Add an OpenRouter API key in Settings or switch to local Codex/OpenCode models."
+        message: "Selected configuration includes OpenRouter models. Add an OpenRouter API key in Settings or switch to other transports."
+      })
+    }
+
+    if (required_transports.has("metacentrum_openai")) {
+      const has_metacentrum_key = await user_has_metacentrum_key(db, user.id)
+      if (!has_metacentrum_key) return status(403, {
+        type: "error",
+        message: "Selected configuration includes MetaCentrum models. Add a MetaCentrum API key in Settings."
       })
     }
 

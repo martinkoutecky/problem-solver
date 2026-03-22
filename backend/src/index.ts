@@ -12,6 +12,7 @@ import { get_server_url } from "@backend/server"
 import { ensure_local_profile } from "@backend/auth/local"
 import { get_db } from "./db"
 import { get_startup_recovery_mode, reconcile_inflight_research } from "./jobs/startup_recovery"
+import { ensure_app_settings_table } from "./app_settings"
 
 const api_router = new Elysia({ prefix: "/api" })
   .get("/health", { status: "ok" })
@@ -50,6 +51,7 @@ export const app = new Elysia()
   .use(frontend)
   .onStart(async () => {
     await ensure_local_profile()
+    await ensure_app_settings_table(get_db())
     const startup_recovery_mode = get_startup_recovery_mode()
     if (startup_recovery_mode === "fail_and_purge") {
       const { affected_problems, affected_rounds } = await reconcile_inflight_research(get_db())
@@ -105,6 +107,7 @@ declare module "bun" {
 
     OPENROUTER_API_KEY?: string,
     OPENROUTER_PROVISION_KEY?: string,
+    METACENTRUM_BASE_URL?: string,
 
     REDIS_URL: string,
     OUTPUT_MIRROR_ENABLED?: string,
@@ -115,13 +118,15 @@ declare module "bun" {
     BULLMQ_STALLED_INTERVAL_MS?: string,
     CODEX_TIMEOUT_MS?: string,
     CODEX_BIN?: string,
-    OPENCODE_TIMEOUT_MS?: string,
-    OPENCODE_BIN?: string,
-    OPENCODE_DEBUG?: string,
+    GEMINI_TIMEOUT_MS?: string,
+    GEMINI_BIN?: string,
+    GEMINI_DEBUG?: string,
 
     CLAUDE_BIN?: string,
     CLAUDE_TIMEOUT_MS?: string,
     CLAUDE_DEBUG?: string,
+    CLAUDE_USAGE_PYTHON_BIN?: string,
+    GEMINI_BUNDLE_PATH?: string,
   }
 }
 

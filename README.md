@@ -19,7 +19,7 @@ The design has not been made responsive yet. Therefore, it is recommended to use
 ### Backend
 
 - HTTP server runs on [`Elysia`](https://elysiajs.com/).
-- LLM requests can be routed through local [`Codex`](https://github.com/openai/codex), local [`OpenCode`](https://opencode.ai/), local Claude CLI, and/or [`OpenRouter`](https://openrouter.ai/).
+- LLM requests can be routed through local [`Codex`](https://github.com/openai/codex), local Gemini CLI, local Claude CLI, MetaCentrum OpenAI-compatible API, and/or [`OpenRouter`](https://openrouter.ai/).
 - Custom Job Manager based on [`BullMQ`](https://bullmq.io/) with connection to  self-hosted `Redis`.
 - Database runs on Postgres. Auth supports a local single-user mode and optional Supabase mode.
 - All DB requests should be made through [`Drizzle`](https://orm.drizzle.team/) – `SupabaseSDK` is used only for `.auth` management.
@@ -55,6 +55,10 @@ For local Claude transport, install and authenticate `claude` CLI, then configur
 - `CLAUDE_BIN` (default `claude`)
 - `CLAUDE_TIMEOUT_MS` (default `1800000`)
 - `CLAUDE_DEBUG` (`1` to store transport debug artifacts)
+
+For MetaCentrum OpenAI-compatible transport:
+- Add MetaCentrum API key in `Settings → MetaCentrum API Key`
+- Base URL configurable via `METACENTRUM_BASE_URL` (default `https://llm.ai.e-infra.cz/v1`)
 
 For restart behavior of persisted Redis jobs:
 - `JOB_STARTUP_RECOVERY_MODE=fail_and_purge` (default) marks `queued/running` problems as failed and purges unfinished queue jobs on backend startup, preventing silent re-runs after restart.

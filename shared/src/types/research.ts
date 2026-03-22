@@ -17,7 +17,7 @@ interface Model {
   id: string,
   name: string,
   provider: string,
-  transport?: "openrouter" | "codex_cli" | "opencode_cli" | "claude_cli" | "metacentrum_openai",
+  transport?: "openrouter" | "codex_cli" | "gemini_cli" | "claude_cli" | "metacentrum_openai",
   price: {
     input: number,
     output: number,
@@ -78,9 +78,9 @@ export const provider_details = {
     name: "Claude (Local)",
     logo: "simple-icons:anthropic",
   },
-  opencode: {
-    name: "OpenCode (Local)",
-    logo: "mdi:console-line",
+  gemini: {
+    name: "Gemini (Local)",
+    logo: "devicon-plain:google",
   },
   metacentrum: {
     name: "MetaCentrum",
@@ -427,6 +427,19 @@ export const models = {
       structured_output: true,
       max_output_tokens: null,
     },
+    {
+      id: "gpt-5.3-codex-spark",
+      name: "GPT-5.3 Codex Spark (Local)",
+      provider: "codex",
+      transport: "codex_cli",
+      price: { input: 0, output: 0 },
+      config: {
+        web_search: false,
+        reasoning: ["low", "medium", "high", "xhigh"],
+      },
+      structured_output: true,
+      max_output_tokens: null,
+    },
   ],
   claude: [
     {
@@ -469,12 +482,12 @@ export const models = {
       max_output_tokens: null,
     },
   ],
-  opencode: [
+  gemini: [
     {
-      id: "opencode/google/gemini-3-pro-preview",
-      name: "Gemini 3 Pro Preview (OpenCode Local)",
-      provider: "opencode",
-      transport: "opencode_cli",
+      id: "gemini/gemini-3-pro-preview",
+      name: "Gemini 3 Pro Preview (Local)",
+      provider: "gemini",
+      transport: "gemini_cli",
       price: { input: 0, output: 0 },
       config: {
         web_search: false,
@@ -484,10 +497,10 @@ export const models = {
       max_output_tokens: null,
     },
     {
-      id: "opencode/google/gemini-3-flash-preview",
-      name: "Gemini 3 Flash Preview (OpenCode Local)",
-      provider: "opencode",
-      transport: "opencode_cli",
+      id: "gemini/gemini-3-flash-preview",
+      name: "Gemini 3 Flash Preview (Local)",
+      provider: "gemini",
+      transport: "gemini_cli",
       price: { input: 0, output: 0 },
       config: {
         web_search: false,
@@ -568,7 +581,7 @@ export type ReasoningEffortValue = ReasoningEffort | boolean | null
 /** Roles of available agents */
 type AgentRole =
       "prover" | "verifier" | "summarizer"
-    | "manager"
+    | "manager" | "chat"
 
 /**
  * Creates a type-safe model with validated reasoning and web search options.
@@ -602,10 +615,10 @@ export function get_model_by_id(id: ModelID) {
   return null
 }
 
-export function get_model_transport(id: ModelID): "openrouter" | "codex_cli" | "opencode_cli" | "claude_cli" | "metacentrum_openai" {
+export function get_model_transport(id: ModelID): "openrouter" | "codex_cli" | "gemini_cli" | "claude_cli" | "metacentrum_openai" {
   const model = get_model_by_id(id)
   if (!model) return "openrouter"
-  return model.transport ?? "openrouter"
+  return ("transport" in model ? model.transport : undefined) ?? "openrouter"
 }
 
 export const ModelConfigSchema = (role: AgentRole | "") => z.object({
@@ -676,10 +689,10 @@ export const ModelConfigSchema = (role: AgentRole | "") => z.object({
     }
 
     //Check if role allows structured data
-    if (data.role !== "prover" && !model.structured_output) {
+    if (data.role !== "prover" && data.role !== "chat" && !model.structured_output) {
       ctx.addIssue({
         code: "custom",
-        message: `Model "${data.id}" does not support strucuted output – can be used only for prover.`,
+        message: `Model "${data.id}" does not support strucuted output - can be used only for prover or chat.`,
         path: ["id"],
       })
     }

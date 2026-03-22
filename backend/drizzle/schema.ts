@@ -3,6 +3,7 @@ import { pgSchema, foreignKey, uuid, timestamp, integer, text, jsonb, json, nume
 import type { LLMUsage } from "../src/jobs/generate_llm_response"
 import { UserRoleValues, KeySourceValues } from "../../shared/src/auth"
 import { InviteStatusValues } from "../../shared/src/admin/invites"
+import type { ModelVisibility } from "../../shared/src/admin/models"
 
 // TODO: convert all "json" to "jsonb"?
 
@@ -166,12 +167,22 @@ export const profiles = main.table("profiles", {
   openrouter_key_encrypted: text(),
   openrouter_key_iv: text(),
   encryption_key_version: integer(),
+  metacentrum_key_encrypted: text(),
+  metacentrum_key_iv: text(),
+  metacentrum_encryption_key_version: integer(),
 
   key_source: key_source(),
   // FK to invites.id if key was provisioned
   // BUG: Shoulnd't the FK be defined below as well?
   provisioned_invite_id: uuid(),
 
+  created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+  updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
+})
+
+export const app_settings = main.table("app_settings", {
+  id: text().primaryKey().notNull(),
+  model_visibility: jsonb().$type<ModelVisibility>().notNull().default({} as ModelVisibility),
   created_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
   updated_at: timestamp({ withTimezone: true, mode: "string" }).defaultNow().notNull(),
 })

@@ -65,6 +65,7 @@ async function resolve_auth({ cookie }: {
         role: true,
         created_at: true,
         openrouter_key_encrypted: true,
+        metacentrum_key_encrypted: true,
         key_source: true,
       }
     })
@@ -84,6 +85,7 @@ async function resolve_auth({ cookie }: {
       role: profile.role,
       name: profile.name,
       has_openrouter_key: !!profile.openrouter_key_encrypted,
+      has_metacentrum_key: !!profile.metacentrum_key_encrypted,
       key_source: profile.key_source,
       created_at: profile.created_at,
     }
@@ -149,6 +151,7 @@ async function resolve_auth({ cookie }: {
       role: true,
       created_at: true,
       openrouter_key_encrypted: true,
+      metacentrum_key_encrypted: true,
       key_source: true,
     }
   })
@@ -170,6 +173,7 @@ async function resolve_auth({ cookie }: {
     name: profile.name,
     // NEVER EXPOSE KEY!
     has_openrouter_key: !!profile.openrouter_key_encrypted,
+    has_metacentrum_key: !!profile.metacentrum_key_encrypted,
     key_source: profile.key_source,
     created_at: profile.created_at,
   }

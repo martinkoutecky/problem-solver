@@ -1,14 +1,16 @@
 import { z } from "zod"
-import { mkdirSync, existsSync } from "node:fs"
+import { mkdirSync, existsSync, mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { get_model_by_id, get_model_transport } from "@shared/types/research"
 import type { ModelConfig, ModelID } from "@shared/types/research"
 import { save_llm_log } from "./research_utils"
 import type { DbOrTx } from "./research_utils"
 import { get_user_openrouter_key } from "@backend/openrouter/provider"
+import { get_metacentrum_api_base_url, get_metacentrum_model_id, get_user_metacentrum_key } from "@backend/metacentrum/provider"
 
 export interface LLMUsage {
   cost: number | null,
-  transport: "openrouter" | "codex_cli" | "opencode_cli",
+  transport: "openrouter" | "codex_cli" | "gemini_cli" | "claude_cli" | "metacentrum_openai",
   [key: string]: unknown,
 }
 
@@ -27,6 +29,15 @@ interface OpenRouterAPIResponse {
   output: OpenRouterOutputBlock[],
   usage?: Record<string, unknown>,
   status?: string,
+}
+
+interface OpenAIChatCompletionsResponse {
+  choices?: Array<{
+    message?: {
+      content?: string | Array<{ type?: string, text?: string }>,
+    },
+  }>,
+  usage?: Record<string, unknown>,
 }
 
 interface LLMSuccessResponse {
@@ -117,6 +128,19 @@ function extract_text_output(data: OpenRouterAPIResponse) {
   }
 }
 
+function extract_openai_choice_text(data: OpenAIChatCompletionsResponse) {
+  const content = data.choices?.[0]?.message?.content
+  if (typeof content === "string") return content
+  if (Array.isArray(content)) {
+    const text = content
+      .map((item) => (item && typeof item.text === "string" ? item.text : ""))
+      .join("")
+      .trim()
+    return text || null
+  }
+  return null
+}
+
 function parse_json_output<T>(text: string, schema: z.ZodType<T>, log_prefix: string): T {
   const candidates = extract_json_candidates(text)
   let parsed_json: unknown
@@ -139,7 +163,8 @@ function parse_json_output<T>(text: string, schema: z.ZodType<T>, log_prefix: st
   }
 
   try {
-    const result = schema.parse(parsed_json) as T
+    const normalized = normalize_common_structured_output(parsed_json)
+    const result = schema.parse(normalized) as T
     console.log(`${log_prefix} Zod validation passed`)
     return result
   } catch (err) {
@@ -295,6 +320,36 @@ function get_codex_reasoning_effort(model: ModelConfig): "low" | "medium" | "hig
   return "medium"
 }
 
+function build_gemini_prompt(messages: LLMMessages[]) {
+  return build_codex_prompt(messages)
+}
+
+function build_gemini_json_prompt(messages: LLMMessages[], schema: Record<string, unknown>) {
+  return (
+    build_gemini_prompt(messages)
+    + "\n\nIMPORTANT STRUCTURED OUTPUT REQUIREMENT:\n"
+    + "- Return only a valid JSON object matching the requested shape.\n"
+    + "- Do not wrap the JSON in markdown fences.\n"
+    + "- Do not return explanations before or after the JSON.\n\n"
+    + JSON.stringify(schema, null, 2)
+  )
+}
+
+function build_json_recovery_prompt(schema: Record<string, unknown>, raw_response: string) {
+  return (
+    "You are repairing a previous model response into strict JSON.\n"
+    + "Return only one valid JSON object matching the schema below.\n"
+    + "Do not wrap the JSON in markdown fences.\n"
+    + "Do not include explanations before or after the JSON.\n"
+    + "If the previous response is plain prose rather than an explicit structured action,\n"
+    + "map it into the schema as faithfully as possible instead of copying the prose verbatim.\n\n"
+    + "Required schema:\n"
+    + JSON.stringify(schema, null, 2)
+    + "\n\nPrevious response to repair:\n"
+    + raw_response
+  )
+}
+
 function build_codex_prompt(messages: LLMMessages[]) {
   const prefix = [
     "IMPORTANT RUNTIME CONSTRAINTS:",
@@ -319,17 +374,34 @@ function get_codex_cli_model_id(model_id: string) {
   return model_id
 }
 
-const OPENCODE_GEMINI_PRO_MODEL_ID = "opencode/google/gemini-3-pro-preview" as const
-const OPENCODE_GEMINI_FLASH_MODEL_ID = "opencode/google/gemini-3-flash-preview" as const
+const GEMINI_PRO_MODEL_ID = "gemini/gemini-3-pro-preview" as const
+const GEMINI_FLASH_MODEL_ID = "gemini/gemini-3-flash-preview" as const
 
-function get_opencode_cli_model_id(model_id: string) {
-  if (model_id === OPENCODE_GEMINI_PRO_MODEL_ID) return "google/gemini-3-pro-preview"
-  if (model_id === OPENCODE_GEMINI_FLASH_MODEL_ID) return "google/gemini-3-flash-preview"
+function get_gemini_cli_model_id(model_id: string) {
+  if (model_id === GEMINI_PRO_MODEL_ID) return "gemini-3-pro-preview"
+  if (model_id === GEMINI_FLASH_MODEL_ID) return "gemini-3-flash-preview"
   return model_id
 }
 
-function is_opencode_quota_error(text: string) {
-  return /(quota|resource[_\s-]?exhausted|rate[_\s-]?limit|daily[_\s-]?limit|too many requests|status[^0-9]*429|\b429\b)/i.test(text)
+function get_claude_cli_model_id(model_id: string) {
+  if (model_id === "claude/claude-opus-4-6") return "claude-opus-4-6"
+  if (model_id === "claude/claude-sonnet-4-6") return "claude-sonnet-4-6"
+  if (model_id === "claude/claude-haiku-4-5") return "claude-haiku-4-5"
+  return model_id
+}
+
+function get_claude_reasoning_effort(model: ModelConfig): "low" | "medium" | "high" {
+  const value = model.config.reasoning_effort
+  if (value === "low" || value === "medium" || value === "high") return value
+  return "medium"
+}
+
+function get_gemini_thinking_budget(model: ModelConfig) {
+  const value = model.config.reasoning_effort
+  if (value === "medium") return 512
+  if (value === "high") return 8192
+  if (value === "xhigh") return -1
+  return 0
 }
 
 function ensure_local_temp_dir() {
@@ -351,8 +423,12 @@ function should_debug_codex() {
   return Bun.env.CODEX_DEBUG === "1" || Bun.env.CODEX_DEBUG === "true"
 }
 
-function should_debug_opencode() {
-  return Bun.env.OPENCODE_DEBUG === "1" || Bun.env.OPENCODE_DEBUG === "true"
+function should_debug_gemini() {
+  return Bun.env.GEMINI_DEBUG === "1" || Bun.env.GEMINI_DEBUG === "true"
+}
+
+function should_debug_claude() {
+  return Bun.env.CLAUDE_DEBUG === "1" || Bun.env.CLAUDE_DEBUG === "true"
 }
 
 async function run_codex_exec(command: string[], timeout_ms: number, input?: string) {
@@ -386,11 +462,12 @@ async function run_codex_exec(command: string[], timeout_ms: number, input?: str
   return { exit_code, stdout, stderr, timed_out }
 }
 
-async function run_opencode_exec(command: string[], timeout_ms: number) {
+async function run_simple_exec(command: string[], timeout_ms: number, cwd?: string) {
   const proc = Bun.spawn(command, {
     stdout: "pipe",
     stderr: "pipe",
     stdin: "ignore",
+    cwd,
   })
 
   let timed_out = false
@@ -410,6 +487,24 @@ async function run_opencode_exec(command: string[], timeout_ms: number) {
   const stderr = await new Response(proc.stderr).text()
 
   return { exit_code, stdout, stderr, timed_out }
+}
+
+async function run_claude_exec(command: string[], timeout_ms: number) {
+  const timeout_seconds = Math.max(1, Math.ceil(timeout_ms / 1000))
+  const wrapped_command = [
+    "timeout",
+    "--foreground",
+    `${timeout_seconds}s`,
+    ...command,
+  ]
+
+  const result = await run_simple_exec(wrapped_command, timeout_ms + 5000)
+  const timed_out = result.timed_out || result.exit_code === 124
+  return {
+    ...result,
+    timed_out,
+    wrapped_command,
+  }
 }
 
 function summarize_codex_jsonl(stdout: string) {
@@ -567,73 +662,10 @@ function extract_codex_output_from_stdout_fallback(stdout: string) {
   return candidates[0]
 }
 
-function extract_opencode_output_from_json(stdout: string) {
-  const lines = stdout.split("\n").map(line => line.trim()).filter(Boolean)
-  const strong_candidates: string[] = []
-  const weak_candidates: string[] = []
-
-  const push_candidate = (target: string[], value: string) => {
-    const cleaned = value.trim()
-    if (!cleaned) return
-    if (cleaned.length < 2) return
-    target.push(cleaned)
-  }
-
-  const collect_string_fields = (value: unknown, target: string[]): void => {
-    if (!value || typeof value !== "object") return
-    if (Array.isArray(value)) {
-      for (const item of value) collect_string_fields(item, target)
-      return
-    }
-    const obj = value as Record<string, unknown>
-    if (typeof obj.text === "string") push_candidate(target, obj.text)
-    if (typeof obj.message === "string") push_candidate(target, obj.message)
-    if (typeof obj.content === "string") push_candidate(target, obj.content)
-  }
-
-  for (const line of lines) {
-    if (!line.startsWith("{")) continue
-    try {
-      const event = JSON.parse(line) as Record<string, unknown>
-      const type = typeof event.type === "string" ? event.type : ""
-      const role = typeof event.role === "string" ? event.role : ""
-
-      if (typeof event.text === "string" && role === "assistant") {
-        push_candidate(strong_candidates, event.text)
-      }
-      if (typeof event.message === "string" && role === "assistant") {
-        push_candidate(strong_candidates, event.message)
-      }
-
-      if (type === "item.completed") {
-        const item = event.item
-        if (item && typeof item === "object") {
-          const i = item as Record<string, unknown>
-          const item_type = typeof i.type === "string" ? i.type : ""
-          if (item_type === "agent_message" || item_type === "assistant_message" || item_type === "message") {
-            collect_string_fields(i, strong_candidates)
-          } else if (item_type === "reasoning") {
-            // Ignore reasoning blocks; these often contain JSON-like snippets
-            // that are not the requested structured output schema.
-          } else {
-            collect_string_fields(i, weak_candidates)
-          }
-        }
-      } else if (type === "agent_message" || type === "assistant_message") {
-        collect_string_fields(event, strong_candidates)
-      } else if (/assistant|message|response|output|completed/i.test(type)) {
-        collect_string_fields(event, weak_candidates)
-      } else {
-        collect_string_fields(event, weak_candidates)
-      }
-    } catch {
-      // noop
-    }
-  }
-
-  const ordered = [...strong_candidates, ...weak_candidates]
-  if (ordered.length === 0) return null
-  return ordered[ordered.length - 1]
+function get_gemini_alias_name(model_id: string, reasoning_effort: ModelConfig["config"]["reasoning_effort"]) {
+  const model_slug = model_id.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase()
+  const effort_slug = String(reasoning_effort ?? "default").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase()
+  return `bolzano-${model_slug}-${effort_slug}`
 }
 
 function parse_json_output_candidates<T>(candidates: string[], schema: z.ZodType<T>): T | null {
@@ -662,6 +694,23 @@ function parse_json_output_candidates<T>(candidates: string[], schema: z.ZodType
   return null
 }
 
+function parse_json_output_candidates_strict<T>(candidates: string[], schema: z.ZodType<T>): T | null {
+  for (const candidate of candidates) {
+    const json_candidates = extract_json_candidates(candidate)
+    for (const json_candidate of json_candidates) {
+      try {
+        const parsed = parse_json_with_repairs(json_candidate)
+        const normalized = normalize_common_structured_output(parsed)
+        const validated = schema.safeParse(normalized)
+        if (validated.success) return validated.data
+      } catch {
+        // try next candidate
+      }
+    }
+  }
+  return null
+}
+
 function parse_markdown_structured_fallback<T>(candidates: string[], schema: z.ZodType<T>): T | null {
   const text = candidates.find((candidate) => candidate.trim().length > 0)
   if (!text) return null
@@ -683,11 +732,60 @@ function parse_markdown_structured_fallback<T>(candidates: string[], schema: z.Z
   return null
 }
 
+async function prepare_gemini_workspace(model: ModelConfig) {
+  const temp_dir = mkdtempSync(`${tmpdir()}/gemini-llm-`)
+  const settings_dir = `${temp_dir}/.gemini`
+  mkdirSync(settings_dir, { recursive: true })
+
+  const alias_name = get_gemini_alias_name(model.id, model.config.reasoning_effort)
+  const settings_payload = {
+    modelConfigs: {
+      customAliases: {
+        [alias_name]: {
+          extends: "base",
+          modelConfig: {
+            model: get_gemini_cli_model_id(model.id),
+            generateContentConfig: {
+              thinkingConfig: {
+                thinkingBudget: get_gemini_thinking_budget(model),
+              },
+            },
+          },
+        },
+      },
+    },
+  }
+
+  await Bun.write(`${settings_dir}/settings.json`, JSON.stringify(settings_payload, null, 2))
+  return { temp_dir, alias_name }
+}
+
+function extract_gemini_output_payload(stdout: string) {
+  const text = stdout.trim()
+  if (!text) throw new Error("gemini returned empty stdout")
+
+  const candidates = [text]
+  candidates.push(...text.split("\n").map(line => line.trim()).filter(line => line.startsWith("{")))
+
+  for (const candidate of [...candidates].reverse()) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+
+  throw new Error("gemini returned invalid JSON output")
+}
+
 function normalize_common_structured_output(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value
   const obj = { ...(value as Record<string, unknown>) }
 
-  // Common verifier shape issue on Gemini/OpenCode:
+  // Common verifier shape issue on Gemini/Codex/Claude local transports:
   // notes/proofs/output updates returned as plain strings instead of { action, content }.
   for (const key of ["notes_update", "proofs_update", "output_update"] as const) {
     const update = obj[key]
@@ -783,12 +881,68 @@ function normalize_common_structured_output(value: unknown): unknown {
 
   return obj
 }
+function get_claude_output_candidates(stdout: string) {
+  const trimmed = stdout.trim()
+  const candidates: string[] = []
 
-function get_opencode_output_candidates(stdout: string) {
-  const by_message = collect_opencode_text_by_message(stdout)
-  const primary = extract_opencode_output_from_json(stdout)
-  const fallback = extract_codex_output_from_stdout_fallback(stdout)
-  const candidates = [...by_message, primary, fallback].filter((value): value is string => Boolean(value))
+  const push_candidate = (value: unknown) => {
+    if (value == null) return
+    let cleaned = ""
+    if (typeof value === "string") cleaned = value.trim()
+    else if (typeof value === "object") cleaned = JSON.stringify(value)
+    else return
+    if (!cleaned) return
+    candidates.push(cleaned)
+  }
+
+  const collect_strings_deep = (value: unknown): void => {
+    if (!value || typeof value !== "object") return
+    if (Array.isArray(value)) {
+      for (const item of value) collect_strings_deep(item)
+      return
+    }
+
+    const obj = value as Record<string, unknown>
+    for (const key of ["result", "text", "message", "content", "output", "completion"] as const) {
+      push_candidate(obj[key])
+    }
+
+    if (Array.isArray(obj.content)) {
+      for (const block of obj.content) {
+        if (!block || typeof block !== "object") continue
+        const typed = block as Record<string, unknown>
+        push_candidate(typed.text)
+        push_candidate(typed.content)
+      }
+    }
+
+    for (const nested of Object.values(obj)) {
+      collect_strings_deep(nested)
+    }
+  }
+
+  if (trimmed) candidates.push(trimmed)
+
+  const lines = trimmed.split("\n").map((line) => line.trim()).filter(Boolean)
+  for (const line of lines) {
+    if (!line.startsWith("{")) continue
+    try {
+      const parsed = JSON.parse(line) as unknown
+      collect_strings_deep(parsed)
+    } catch {
+      // noop
+    }
+  }
+
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown
+      collect_strings_deep(parsed)
+    } catch {
+      // noop
+    }
+  }
+
   const deduped: string[] = []
   const seen = new Set<string>()
   for (const candidate of candidates) {
@@ -797,36 +951,6 @@ function get_opencode_output_candidates(stdout: string) {
     deduped.push(candidate)
   }
   return deduped
-}
-
-function collect_opencode_text_by_message(stdout: string) {
-  const lines = stdout.split("\n").map(line => line.trim()).filter(Boolean)
-  const by_message = new Map<string, string>()
-
-  for (const line of lines) {
-    if (!line.startsWith("{")) continue
-    try {
-      const event = JSON.parse(line) as Record<string, unknown>
-      if (event.type !== "text") continue
-
-      const part = event.part
-      if (!part || typeof part !== "object") continue
-      const p = part as Record<string, unknown>
-      if (typeof p.text !== "string") continue
-
-      const message_id = typeof p.messageID === "string"
-        ? p.messageID
-        : typeof p.id === "string"
-          ? p.id
-          : crypto.randomUUID()
-
-      by_message.set(message_id, (by_message.get(message_id) ?? "") + p.text)
-    } catch {
-      // noop
-    }
-  }
-
-  return Array.from(by_message.values()).map((value) => value.trim()).filter(Boolean)
 }
 
 async function generate_via_openrouter<T>(
@@ -920,6 +1044,119 @@ async function generate_via_openrouter<T>(
         transport: "openrouter",
         cost: typeof data.usage?.cost === "number" ? data.usage.cost : null,
         ...(data.usage ?? {})
+      }
+
+      if (save_to_db) {
+        await save_llm_log(db, prompt_file_id, { output, request_body }, usage, model_id)
+      }
+
+      if (is_structured) {
+        return { success: true, output: output as T, usage, time, model_id } as LLMStructuredSuccessResponse<T>
+      }
+      return { success: true, output: output as string, usage, time, model_id } as LLMTextSuccessResponse
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e))
+      console.warn(`${log_prefix} [${attempt}/${max_retries}] Failed: ${error.message}`)
+      if (attempt === max_retries) return { success: false, error, model_id }
+    }
+  }
+
+  return { success: false, error: new Error("Unexpected error"), model_id }
+}
+
+async function generate_via_metacentrum_openai<T>(
+  params: GenerateLLMParams<T>,
+  schema: z.ZodType<T> | undefined,
+  is_structured: boolean
+): Promise<LLMStructuredResponse<T> | LLMTextResponse> {
+  const {
+    db,
+    model,
+    user_id,
+    messages,
+    prompt_file_id,
+    context,
+    max_retries = 3,
+    save_to_db = true,
+    temperature = 1,
+  } = params
+
+  const log_prefix = `[MetaCentrum][${model.id}][${context}]`
+  const model_id = model.id
+  const provider_model_id = get_metacentrum_model_id(model.id)
+  const model_info = get_model_by_id(model_id)!
+  const api_key = await get_user_metacentrum_key(db, user_id)
+  const api_base = get_metacentrum_api_base_url()
+
+  const request_body: Record<string, unknown> = {
+    model: provider_model_id,
+    messages: messages.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    })),
+    temperature,
+  }
+
+  if (model_info.max_output_tokens) {
+    request_body.max_tokens = model_info.max_output_tokens
+  }
+
+  if (schema) {
+    request_body.response_format = {
+      type: "json_schema",
+      json_schema: {
+        name: `${context}-schema`.replace(/\s+/g, "-").toLowerCase(),
+        strict: true,
+        schema: schema.toJSONSchema(),
+      },
+    }
+  }
+
+  for (let attempt = 1; attempt <= max_retries; attempt++) {
+    const start_time = performance.now()
+    console.log(`${log_prefix} attempt ${attempt}/${max_retries}`)
+
+    try {
+      const response = await fetch(`${api_base}/chat/completions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${api_key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(request_body),
+      })
+
+      if (!response.ok) {
+        const error_text = await response.text()
+        const lower = error_text.toLowerCase()
+        if (is_structured && (
+          lower.includes("response_format")
+          || lower.includes("json_schema")
+          || lower.includes("structured")
+          || lower.includes("schema")
+        )) {
+          throw new Error(
+            "MetaCentrum rejected strict JSON schema mode for structured output. " +
+            "This transport is configured to fail hard for verifier/summarizer in that case."
+          )
+        }
+        console.error(`${log_prefix} API error:`, error_text.slice(0, 1000))
+        throw new Error(`API error ${response.status}`)
+      }
+
+      const data = (await response.json()) as OpenAIChatCompletionsResponse
+      const time = (performance.now() - start_time) / 1000
+      const output_text = extract_openai_choice_text(data)
+      if (!output_text) throw new Error("No text output in response")
+
+      let output: T | string
+      if (is_structured && schema) output = parse_json_output(output_text, schema, log_prefix)
+      else output = output_text
+
+      const usage: LLMUsage = {
+        transport: "metacentrum_openai",
+        cost: null,
+        ...(data.usage ?? {}),
       }
 
       if (save_to_db) {
@@ -1118,7 +1355,7 @@ async function generate_via_codex_cli<T>(
   return { success: false, error: new Error("Unexpected error"), model_id }
 }
 
-async function generate_via_opencode_cli<T>(
+async function generate_via_gemini_cli<T>(
   params: GenerateLLMParams<T>,
   schema: z.ZodType<T> | undefined,
   is_structured: boolean
@@ -1133,92 +1370,233 @@ async function generate_via_opencode_cli<T>(
     messages,
   } = params
 
-  const initial_model_id = model.id
-  const log_prefix = `[OpenCode][${initial_model_id}][${context}]`
-  const opencode_bin = Bun.env.OPENCODE_BIN ?? "opencode"
-  const timeout_ms = Number(Bun.env.OPENCODE_TIMEOUT_MS ?? "1800000")
+  const model_id = model.id
+  const log_prefix = `[Gemini][${model_id}][${context}]`
+  const gemini_bin = Bun.env.GEMINI_BIN ?? "gemini"
+  const timeout_ms = Number(Bun.env.GEMINI_TIMEOUT_MS ?? "1800000")
+  const schema_json = schema ? schema.toJSONSchema() : null
+
+  for (let attempt = 1; attempt <= max_retries; attempt++) {
+    const start_time = performance.now()
+    let temp_dir = ""
+    let command: string[] = []
+    let last_stdout = ""
+    let last_stderr = ""
+    let recovery_used = false
+
+    try {
+      const run_gemini = async (prompt: string, label: string) => {
+        const workspace = await prepare_gemini_workspace(model)
+        temp_dir = workspace.temp_dir
+        command = [
+          gemini_bin,
+          "-p",
+          prompt,
+          "-m",
+          workspace.alias_name,
+          "-o",
+          "json",
+          "--approval-mode=plan",
+        ]
+
+        const result = await run_simple_exec(command, timeout_ms, workspace.temp_dir)
+        last_stdout = result.stdout
+        last_stderr = result.stderr
+
+        if (should_debug_gemini()) {
+          const debug_dir = get_debug_dir(workspace.temp_dir)
+          const attempt_prefix = `${debug_dir}/gemini-${label}-attempt-${attempt}-${crypto.randomUUID()}`
+          await Bun.write(`${attempt_prefix}.command.txt`, command.join(" "))
+          await Bun.write(`${attempt_prefix}.prompt.txt`, prompt)
+          await Bun.write(`${attempt_prefix}.stdout.json`, result.stdout)
+          await Bun.write(`${attempt_prefix}.stderr.log`, result.stderr)
+          await Bun.write(`${attempt_prefix}.summary.json`, JSON.stringify({
+            exit_code: result.exit_code,
+            timed_out: result.timed_out,
+            alias_name: workspace.alias_name,
+            model_id,
+          }, null, 2))
+        }
+
+        if (result.timed_out) {
+          throw new Error(`gemini timed out after ${timeout_ms}ms`)
+        }
+        if (result.exit_code !== 0) {
+          throw new Error(
+            `gemini failed (${result.exit_code}): ` +
+            `${(result.stderr || result.stdout || "unknown gemini CLI failure").slice(0, 2000)}`
+          )
+        }
+
+        const payload = extract_gemini_output_payload(result.stdout)
+        if (payload.error) {
+          throw new Error(String(payload.error))
+        }
+
+        const response = payload.response
+        if (typeof response === "string" && response.trim()) {
+          return response.trim()
+        }
+        if (response && typeof response === "object") {
+          return JSON.stringify(response)
+        }
+        throw new Error("gemini returned no assistant response")
+      }
+
+      const prompt = is_structured && schema_json
+        ? build_gemini_json_prompt(messages, schema_json)
+        : build_gemini_prompt(messages)
+
+      let raw_output = await run_gemini(prompt, "primary")
+      let output: T | string
+
+      if (is_structured && schema && schema_json) {
+        try {
+          output = parse_json_output(raw_output, schema, log_prefix)
+        } catch {
+          recovery_used = true
+          const repaired_output = await run_gemini(build_json_recovery_prompt(schema_json, raw_output), "recovery")
+          output = parse_json_output(repaired_output, schema, log_prefix)
+          raw_output = repaired_output
+        }
+      } else {
+        output = raw_output
+      }
+
+      const time = (performance.now() - start_time) / 1000
+      const usage: LLMUsage = { transport: "gemini_cli", cost: 0 }
+      const warnings = recovery_used
+        ? ["Gemini response needed a JSON repair pass before validation."]
+        : undefined
+
+      if (save_to_db) {
+        await save_llm_log(db, prompt_file_id, { output, command, warnings, temp_dir }, usage, model_id)
+      }
+
+      if (is_structured) return {
+        success: true,
+        output: output as T,
+        usage,
+        time,
+        model_id,
+        warnings,
+      } as LLMStructuredSuccessResponse<T>
+
+      return {
+        success: true,
+        output: output as string,
+        usage,
+        time,
+        model_id,
+        warnings,
+      } as LLMTextSuccessResponse
+    } catch (e) {
+      const error = e instanceof Error ? e : new Error(String(e))
+      console.warn(`${log_prefix} [${attempt}/${max_retries}] Failed: ${error.message}`)
+      if (!should_debug_gemini() && temp_dir) {
+        const debug_dir = get_debug_dir(temp_dir)
+        const attempt_prefix = `${debug_dir}/gemini-failure-attempt-${attempt}-${crypto.randomUUID()}`
+        await Bun.write(`${attempt_prefix}.command.txt`, command.join(" "))
+        await Bun.write(`${attempt_prefix}.stderr.log`, last_stderr)
+        await Bun.write(`${attempt_prefix}.stdout.json`, last_stdout)
+        await Bun.write(`${attempt_prefix}.summary.json`, JSON.stringify({
+          model_id,
+          error: error.message,
+        }, null, 2))
+      }
+      if (attempt === max_retries) return { success: false, error, model_id }
+    }
+  }
+
+  return { success: false, error: new Error("Unexpected error"), model_id }
+}
+
+async function generate_via_claude_cli<T>(
+  params: GenerateLLMParams<T>,
+  schema: z.ZodType<T> | undefined,
+  is_structured: boolean
+): Promise<LLMStructuredResponse<T> | LLMTextResponse> {
+  const {
+    db,
+    model,
+    prompt_file_id,
+    context,
+    max_retries = 3,
+    save_to_db = true,
+    messages,
+  } = params
+
+  const model_id = model.id
+  const log_prefix = `[Claude][${model_id}][${context}]`
+  const claude_bin = Bun.env.CLAUDE_BIN ?? "claude"
+  const timeout_ms = Number(Bun.env.CLAUDE_TIMEOUT_MS ?? "1800000")
   const prompt = build_codex_prompt(messages)
-  let active_model_id = initial_model_id
-  let fallback_used = false
-  let fallback_warning: string | null = null
 
   for (let attempt = 1; attempt <= max_retries; attempt++) {
     const start_time = performance.now()
     const temp_dir = ensure_local_temp_dir()
+    let last_result: Awaited<ReturnType<typeof run_claude_exec>> | null = null
+
     const command = [
-      opencode_bin,
-      "run",
-      "-m",
-      get_opencode_cli_model_id(active_model_id),
-      "--format",
+      claude_bin,
+      "-p",
+      "--output-format",
       "json",
-      prompt,
+      "--model",
+      get_claude_cli_model_id(model_id),
+      "--tools",
+      "",
+      "--permission-mode",
+      "dontAsk",
+      "--effort",
+      get_claude_reasoning_effort(model),
     ]
+    if (schema) {
+      command.push("--json-schema", JSON.stringify(schema.toJSONSchema()))
+    }
+    command.push(prompt)
 
     try {
-      const result = await run_opencode_exec(command, timeout_ms)
-      const diagnostics = summarize_codex_jsonl(result.stdout)
+      const result = await run_claude_exec(command, timeout_ms)
+      last_result = result
 
-      if (should_debug_opencode()) {
+      const debug_enabled = should_debug_claude()
+      if (debug_enabled) {
         const debug_dir = get_debug_dir(temp_dir)
-        const attempt_prefix = `${debug_dir}/opencode-attempt-${attempt}-${crypto.randomUUID()}`
-        await Bun.write(`${attempt_prefix}.command.txt`, command.join(" "))
+        const attempt_prefix = `${debug_dir}/claude-attempt-${attempt}-${crypto.randomUUID()}`
+        await Bun.write(`${attempt_prefix}.command.txt`, result.wrapped_command.join(" "))
         await Bun.write(`${attempt_prefix}.prompt.txt`, prompt)
-        await Bun.write(`${attempt_prefix}.stdout.jsonl`, result.stdout)
+        await Bun.write(`${attempt_prefix}.stdout.json`, result.stdout)
         await Bun.write(`${attempt_prefix}.stderr.log`, result.stderr)
         await Bun.write(`${attempt_prefix}.summary.json`, JSON.stringify({
-          diagnostics,
           exit_code: result.exit_code,
           timed_out: result.timed_out,
-          active_model_id,
+          model_id,
         }, null, 2))
       }
 
-      const combined_output = `${result.stderr}\n${result.stdout}`
       if (result.timed_out) {
-        throw new Error(
-          `opencode run timed out after ${timeout_ms}ms ` +
-          `events=${JSON.stringify(diagnostics.event_types)} ` +
-          `turn_completed=${diagnostics.turn_completed} turn_failed=${diagnostics.turn_failed} ` +
-          `errors=${JSON.stringify(diagnostics.errors.slice(-3))}`
-        )
+        throw new Error(`claude run timed out after ${timeout_ms}ms`)
       }
 
       if (result.exit_code !== 0) {
-        if (!fallback_used && active_model_id === OPENCODE_GEMINI_PRO_MODEL_ID && is_opencode_quota_error(combined_output)) {
-          fallback_used = true
-          active_model_id = OPENCODE_GEMINI_FLASH_MODEL_ID
-          fallback_warning = `Gemini Pro quota exhausted for ${context}; automatically retried with Gemini Flash.`
-          console.warn(`${log_prefix} quota exhausted, retrying with Gemini Flash`)
-          continue
-        }
-
         throw new Error(
-          `opencode run failed (${result.exit_code}): ` +
+          `claude run failed (${result.exit_code}): ` +
           `${(result.stderr || result.stdout).slice(0, 2000)}`
         )
       }
 
-      const output_candidates = get_opencode_output_candidates(result.stdout)
+      const output_candidates = get_claude_output_candidates(result.stdout)
       if (output_candidates.length === 0) {
-        if (!fallback_used && active_model_id === OPENCODE_GEMINI_PRO_MODEL_ID && is_opencode_quota_error(combined_output)) {
-          fallback_used = true
-          active_model_id = OPENCODE_GEMINI_FLASH_MODEL_ID
-          fallback_warning = `Gemini Pro quota exhausted for ${context}; automatically retried with Gemini Flash.`
-          console.warn(`${log_prefix} quota exhausted (empty output), retrying with Gemini Flash`)
-          continue
-        }
         throw new Error(
-          `opencode run did not produce parseable output. ` +
+          `claude run produced no parseable output. ` +
           `stdout=${result.stdout.slice(-600)} stderr=${result.stderr.slice(-600)}`
         )
       }
 
       let output: T | string
       if (is_structured && schema) {
-        const parsed_json = parse_json_output_candidates(output_candidates, schema)
-        const parsed_markdown = parsed_json ? null : parse_markdown_structured_fallback(output_candidates, schema)
-        const parsed = parsed_json ?? parsed_markdown
+        const parsed = parse_json_output_candidates_strict(output_candidates, schema)
         if (!parsed) {
           throw new Error("Response doesn't match expected schema")
         }
@@ -1228,11 +1606,10 @@ async function generate_via_opencode_cli<T>(
       }
 
       const time = (performance.now() - start_time) / 1000
-      const usage: LLMUsage = { transport: "opencode_cli", cost: 0 }
-      const warnings = fallback_warning ? [fallback_warning] : undefined
+      const usage: LLMUsage = { transport: "claude_cli", cost: 0 }
 
       if (save_to_db) {
-        await save_llm_log(db, prompt_file_id, { output, command, warnings }, usage, active_model_id as ModelID)
+        await save_llm_log(db, prompt_file_id, { output, command }, usage, model_id)
       }
 
       if (is_structured) return {
@@ -1240,8 +1617,7 @@ async function generate_via_opencode_cli<T>(
         output: output as T,
         usage,
         time,
-        model_id: active_model_id as ModelID,
-        warnings,
+        model_id,
       } as LLMStructuredSuccessResponse<T>
 
       return {
@@ -1249,26 +1625,30 @@ async function generate_via_opencode_cli<T>(
         output: output as string,
         usage,
         time,
-        model_id: active_model_id as ModelID,
-        warnings,
+        model_id,
       } as LLMTextSuccessResponse
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e))
-      const error_text = error.message ?? ""
-      if (!fallback_used && active_model_id === OPENCODE_GEMINI_PRO_MODEL_ID && is_opencode_quota_error(error_text)) {
-        fallback_used = true
-        active_model_id = OPENCODE_GEMINI_FLASH_MODEL_ID
-        fallback_warning = `Gemini Pro quota exhausted for ${context}; automatically retried with Gemini Flash.`
-        console.warn(`${log_prefix} quota exhausted, retrying with Gemini Flash`)
-        continue
+      if (!should_debug_claude()) {
+        const debug_dir = get_debug_dir(temp_dir)
+        const attempt_prefix = `${debug_dir}/claude-failure-attempt-${attempt}-${crypto.randomUUID()}`
+        await Bun.write(`${attempt_prefix}.command.txt`, command.join(" "))
+        await Bun.write(`${attempt_prefix}.prompt.txt`, prompt)
+        await Bun.write(`${attempt_prefix}.stderr.log`, last_result?.stderr ?? "")
+        await Bun.write(`${attempt_prefix}.stdout.json`, last_result?.stdout ?? "")
+        await Bun.write(`${attempt_prefix}.summary.json`, JSON.stringify({
+          exit_code: last_result?.exit_code ?? null,
+          timed_out: last_result?.timed_out ?? null,
+          model_id,
+          error: error.message,
+        }, null, 2))
       }
-
       console.warn(`${log_prefix} [${attempt}/${max_retries}] Failed: ${error.message}`)
-      if (attempt === max_retries) return { success: false, error, model_id: active_model_id as ModelID }
+      if (attempt === max_retries) return { success: false, error, model_id }
     }
   }
 
-  return { success: false, error: new Error("Unexpected error"), model_id: active_model_id as ModelID }
+  return { success: false, error: new Error("Unexpected error"), model_id }
 }
 
 export async function generate_llm_response(params: GenerateLLMParamsWithoutSchema): Promise<LLMTextResponse>
@@ -1282,6 +1662,8 @@ export async function generate_llm_response<T>(
   const transport = get_model_transport(params.model.id)
 
   if (transport === "codex_cli") return generate_via_codex_cli(params, schema, is_structured)
-  if (transport === "opencode_cli") return generate_via_opencode_cli(params, schema, is_structured)
+  if (transport === "gemini_cli") return generate_via_gemini_cli(params, schema, is_structured)
+  if (transport === "claude_cli") return generate_via_claude_cli(params, schema, is_structured)
+  if (transport === "metacentrum_openai") return generate_via_metacentrum_openai(params, schema, is_structured)
   return generate_via_openrouter(params, schema, is_structured)
 }

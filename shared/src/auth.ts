@@ -14,6 +14,7 @@ export interface User {
   role: UserRole,
   created_at: string,
   has_openrouter_key: boolean,
+  has_metacentrum_key: boolean,
   key_source: KeySource
 }
 
@@ -57,3 +58,6 @@ export const invite_code_schema = z.string().trim()
 export const openrouter_api_key_schema = z.string().trim()
   .nonempty("Openrouter API key is required")
   .startsWith("sk-or-")
+
+export const metacentrum_api_key_schema = z.string().trim()
+  .nonempty("MetaCentrum API key is required")
